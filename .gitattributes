@@ -1,0 +1,6 @@
+# The journal is written with explicit LF newlines and its byte-stability is a
+# tested property. If a journal fixture is ever committed, CRLF normalisation on
+# checkout would break that test on Windows in a way that looks like a code bug.
+* text=auto eol=lf
+*.png binary
+*.db binary

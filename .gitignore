@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Runtime state — never committed
+workspace/
+*.db
+*.db-wal
+*.db-shm
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Secrets: registry.toml references keys by name, but never trust that by default
+.env

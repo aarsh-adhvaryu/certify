@@ -1,0 +1,87 @@
+# Registry for the TEST SUITE. Always the mock provider, never a real one.
+#
+# The tests used to load the project's own config/registry.toml. That was fine
+# while it pointed at the mock, and became a liability the moment a real key was
+# bought: the suite started making live API calls — slow, billable, and failing
+# outright on any machine without the credential.
+#
+# A test suite whose behaviour depends on which model you happen to have
+# configured is not testing what it thinks it is. This file is what the tests
+# use, so the project registry is free to point wherever you like.
+#
+# The shipped registry is still exercised — see test_config.py, which asserts it
+# parses and contains no pasted secrets. That is the right amount of coupling:
+# the tests check that it is *valid*, not that it names any particular model.
+
+[roles.conductor]
+provider = "mock"
+model_id = "mock-conductor"
+base_url = "http://mock.invalid/v1"
+price_in = "0"
+price_out = "0"
+
+[roles.conductor.params]
+temperature = 0.2
+
+[roles.conductor.capabilities]
+context_window = 200000
+modality = "multimodal"
+tool_use = true
+reasoning_effort = true
+supports_caching = true
+
+
+[roles.low]
+provider = "mock"
+model_id = "mock-low"
+base_url = "http://mock.invalid/v1"
+price_in = "0"
+price_out = "0"
+
+[roles.low.params]
+temperature = 0.0
+
+[roles.low.capabilities]
+context_window = 128000
+modality = "text"
+tool_use = true
+reasoning_effort = false
+supports_caching = true
+
+
+[roles.high]
+provider = "mock"
+model_id = "mock-high"
+base_url = "http://mock.invalid/v1"
+price_in = "0"
+price_out = "0"
+
+[roles.high.params]
+temperature = 0.0
+
+[roles.high.capabilities]
+context_window = 128000
+modality = "multimodal"
+tool_use = true
+reasoning_effort = false
+supports_caching = true
+
+
+# Text-only at the top of the ladder, mirroring a real text-only max tier. Kept
+# so the modality routing tests have something to route around.
+[roles.max]
+provider = "mock"
+model_id = "mock-max"
+base_url = "http://mock.invalid/v1"
+price_in = "0"
+price_out = "0"
+
+[roles.max.params]
+temperature = 0.0
+
+[roles.max.capabilities]
+context_window = 128000
+modality = "text"
+tool_use = true
+reasoning_effort = true
+supports_caching = false

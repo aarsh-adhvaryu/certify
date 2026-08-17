@@ -1,0 +1,94 @@
+# Policy for the TEST SUITE. Independent of the project's, so tuning real
+# budget ceilings cannot change what the tests assert.
+# Operating policy — the tunable half of the system.
+#
+# The rules that are cheap to enforce and expensive to get wrong live in code
+# (path jail, role indirection, guard-vs-verifier separation). Everything here is
+# a value whose right setting is an empirical question, so it is configuration.
+
+[jail]
+# Nothing the workers touch may live outside this root. Relative paths resolve
+# against the project root.
+root = "workspace"
+
+[execution]
+# "windows" or "wsl:<distro>". Perception stays Windows-native either way.
+backend = "windows"
+command_timeout_seconds = 300.0
+# A model that keeps calling tools without converging is burning money in a loop
+# the verifier never gets to judge. The cap is deterministic, not the model's call.
+max_tool_iterations = 12
+
+[ladder]
+# Spec 8.1: retry once at the same tier with the failure reason appended (cheap,
+# catches format and transient failures), then escalate. The cap stops a doomed
+# task looping up the bill.
+retries_before_escalation = 1
+max_attempts = 4
+
+[scheduler]
+# The loop that picks work up. Without it, a task reclaimed after a crash sits at
+# PENDING forever and a task parked on a slow check never wakes.
+tick_seconds = 1.0
+max_concurrent = 3
+resume_on_start = true
+
+[budget]
+# Deterministic ceilings, checked BEFORE dispatch. Risk #1 in the spec is cost
+# runaway, and prompt discipline is not a mechanism.
+#
+# Deliberately tight for the first real spending. At DeepSeek rates a normal task
+# costs well under a cent, so $0.10 is roughly 20x headroom on a single task and
+# still stops a runaway loop before it matters. Raise them once there is evidence
+# of what a task actually costs — the logbook will say.
+per_task_usd = "0.50"
+per_day_usd = "5.00"
+
+[context]
+# Append failures to the volatile tail instead of rebuilding the prompt: keeps
+# the cached prefix valid, which is both the cost saving and the latency defence.
+append_on_retry = true
+prune_trigger_tokens = 12000
+
+[verify]
+# Stateful checks quicker than the threshold are awaited inline; slower ones
+# suspend the task to SQLite so no model sits burning context while it waits.
+suspend_threshold_seconds = 2.0
+poll_interval_seconds = 0.5
+poll_timeout_seconds = 30.0
+
+[effort]
+# The conductor's thinking budget is the single biggest cost dial: Kimi bills
+# thinking tokens as output. Low by default; escalate only for real judgement.
+default = "low"
+on_replan = "high"
+on_final_escalation = "max"
+
+[conductor]
+# A malformed task spec is never passed downstream; it is handed back for repair
+# this many times, then the task goes to a human.
+max_spec_repair_attempts = 2
+
+# Who writes the acceptance tests. "separate" means a distinct worker call
+# authors them first and the file is then frozen read-only to the implementer.
+# If the implementer writes both the code and the tests, the gate is theater.
+test_authorship = "separate"
+test_author_role = "low"
+
+# Escalation is verifier-driven and bypasses judgement by design. Re-planning
+# here would fire the most expensive token in the system on the path that is
+# already going badly.
+replan_on_escalation = false
+
+[stream]
+tokens = true
+
+[perception]
+# Below this fraction of window area described by the a11y tree, fall back to
+# the local vision path (spec 8.2).
+a11y_coverage_threshold = 0.3
+
+[commands]
+# Deny by default: an empty allowlist permits nothing. Only these executables
+# may be run by a worker, and the path jail still applies to their working dir.
+allow = ["python", "pytest", "git"]

@@ -1,0 +1,49 @@
+[project]
+name = "aop"
+version = "0.1.0"
+description = "Agentic Operator — OS-level autonomous operator with a conductor over a tiered worker pool"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    # Required, not optional. Uvicorn disables WebSocket support entirely when no
+    # WS library is present at startup and answers /ws with a 404 — so the overlay
+    # connects, fails silently, and shows a dead status dot forever.
+    "websockets>=12",
+]
+
+[project.optional-dependencies]
+# The desktop shell. Optional because the overlay is only a WebSocket
+# subscriber: without these, `aop serve` still works and a browser tab is a
+# complete substitute for the frameless window.
+shell = [
+    "pywebview>=5.0",
+    "pystray>=0.19",
+    "Pillow>=10.0",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q --strict-markers"
+markers = [
+    "wsl: requires a WSL distro to be installed (skipped otherwise)",
+]

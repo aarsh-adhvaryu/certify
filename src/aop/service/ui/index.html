@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator</title>
+<style>
+  /* No external anything. This has to render with the network unplugged, and
+     later it lives inside a frameless webview with no browser chrome. */
+  :root {
+    --bg: #0e1116; --panel: #151a21; --line: #232a34; --line-soft: #1b212a;
+    --text: #d7dee8; --dim: #7d8794; --faint: #4d5661;
+    --accent: #6ea8fe; --pass: #4ade80; --fail: #f87171;
+    --warn: #fbbf24; --think: #a78bfa;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --sans: system-ui, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 9px 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+  }
+  .brand { font-weight: 600; letter-spacing: .3px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .dot.live { background: var(--pass); box-shadow: 0 0 8px var(--pass); }
+  .dot.busy { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: pulse 1.1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .spacer { flex: 1; }
+  .meta { color: var(--dim); font-size: 11.5px; display: flex; gap: 14px; }
+  .meta b { color: var(--text); font-weight: 600; }
+
+  form { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  input[type=text] {
+    flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 11px; color: var(--text); font: 13px var(--sans);
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #0b1020; border: 0; border-radius: 6px;
+    padding: 0 16px; font: 600 13px var(--sans); cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+
+  main { flex: 1; display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+  #stream { overflow-y: auto; padding: 10px 14px; font: 12px/1.65 var(--mono); }
+  aside { border-left: 1px solid var(--line); overflow-y: auto; background: #11151b; }
+
+  .row { display: flex; gap: 9px; padding: 1px 0; align-items: baseline; }
+  .tag {
+    flex: 0 0 auto; font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
+    color: var(--faint); min-width: 64px; text-align: right; user-select: none;
+  }
+  .body { flex: 1; white-space: pre-wrap; word-break: break-word; min-width: 0; }
+
+  .tokens { color: var(--text); }
+  .tokens .reasoning { color: var(--think); font-style: italic; }
+  .info .body   { color: var(--dim); }
+  .routed .body { color: var(--accent); }
+  .pass .body   { color: var(--pass); }
+  .fail .body   { color: var(--fail); }
+  .warn .body   { color: var(--warn); }
+  .gap  .body   { color: var(--warn); font-style: italic; }
+
+  .sep { border-top: 1px solid var(--line-soft); margin: 9px 0 7px; padding-top: 7px; color: var(--dim); }
+  .sep b { color: var(--text); }
+
+  .task { padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+  .task .t { font-size: 12px; margin-bottom: 3px; }
+  .task .s { font-size: 10.5px; color: var(--dim); display: flex; gap: 8px; }
+  .pill { font-size: 10px; padding: 1px 6px; border-radius: 9px; border: 1px solid var(--line); }
+  .pill.running { color: var(--warn); border-color: var(--warn); }
+  .pill.done { color: var(--pass); border-color: var(--pass); }
+  .pill.awaiting_human { color: var(--accent); border-color: var(--accent); }
+  .pill.failed, .pill.halted { color: var(--fail); border-color: var(--fail); }
+  .empty { padding: 18px 14px; color: var(--faint); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot" id="dot"></span>
+  <span class="brand">Operator</span>
+  <span class="spacer"></span>
+  <span class="meta">
+    <span>spend <b id="spend">—</b> / <span id="budget">—</span></span>
+    <span>checkpoints <b id="checkpoints">0</b></span>
+    <span id="backend">—</span>
+  </span>
+</header>
+
+<form id="submit">
+  <input type="text" id="directive" placeholder="Tell it what to do…" autocomplete="off" autofocus>
+  <button type="submit" id="go">Run</button>
+</form>
+
+<main>
+  <div id="stream"><div class="empty">Waiting for something to happen.</div></div>
+  <aside id="tasks"><div class="empty">No tasks yet.</div></aside>
+</main>
+
+<script>
+const stream = document.getElementById('stream');
+const tasksEl = document.getElementById('tasks');
+const dot = document.getElementById('dot');
+let tasks = new Map();
+let tokenRow = null;      // the row currently accumulating streamed tokens
+let firstEvent = true;
+let busy = 0;
+
+const shortId = id => (id || '').replace(/^(task|attempt)_/, '#');
+
+function atBottom() {
+  return stream.scrollHeight - stream.scrollTop - stream.clientHeight < 60;
+}
+
+function add(cls, tag, text) {
+  if (firstEvent) { stream.innerHTML = ''; firstEvent = false; }
+  const stick = atBottom();
+  const row = document.createElement('div');
+  row.className = 'row ' + cls;
+  row.innerHTML = `<span class="tag"></span><span class="body"></span>`;
+  row.children[0].textContent = tag;
+  row.children[1].textContent = text;
+  stream.appendChild(row);
+  if (stick) stream.scrollTop = stream.scrollHeight;
+  return row;
+}
+
+function separator(html) {
+  if (firstEvent) { stream.innerHTML = ''; firstEvent = false; }
+  const stick = atBottom();
+  const el = document.createElement('div');
+  el.className = 'sep';
+  el.innerHTML = html;
+  stream.appendChild(el);
+  if (stick) stream.scrollTop = stream.scrollHeight;
+}
+
+// Tokens arrive in fragments. Append into one row rather than one row per
+// fragment, or a sentence becomes forty lines.
+function token(text, reasoning) {
+  if (!tokenRow) tokenRow = add('tokens', 'output', '');
+  const stick = atBottom();
+  const span = document.createElement('span');
+  if (reasoning) span.className = 'reasoning';
+  span.textContent = text;
+  tokenRow.children[1].appendChild(span);
+  if (stick) stream.scrollTop = stream.scrollHeight;
+}
+const endTokens = () => { tokenRow = null; };
+
+function renderTasks() {
+  if (!tasks.size) { tasksEl.innerHTML = '<div class="empty">No tasks yet.</div>'; return; }
+  tasksEl.innerHTML = '';
+  [...tasks.values()].reverse().forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'task';
+    el.innerHTML = `<div class="t"></div>
+      <div class="s"><span class="pill ${t.status}">${t.status}</span>
+      <span>${t.attempt_count ?? 0} attempt${(t.attempt_count ?? 0) === 1 ? '' : 's'}</span>
+      <span>$${Number(t.cost_usd ?? 0).toFixed(4)}</span></div>`;
+    el.children[0].textContent = t.directive;
+    tasksEl.appendChild(el);
+  });
+}
+
+function setBusy(delta) {
+  busy = Math.max(0, busy + delta);
+  dot.className = 'dot ' + (busy ? 'busy' : 'live');
+}
+
+function handle(e) {
+  switch (e.kind) {
+    case 'task_created':
+      tasks.set(e.task_id, { task_id: e.task_id, directive: e.directive, status: 'pending', attempt_count: 0, cost_usd: '0' });
+      renderTasks();
+      separator(`<b>${shortId(e.task_id)}</b> — ${e.directive}`);
+      setBusy(+1);
+      break;
+
+    case 'task_status': {
+      const t = tasks.get(e.task_id);
+      if (t) { t.status = e.status; renderTasks(); }
+      endTokens();
+      add(e.status === 'done' ? 'pass' : e.status === 'failed' || e.status === 'halted' ? 'fail' : 'info',
+          'status', e.status + (e.reason ? ' — ' + e.reason : ''));
+      if (['done', 'failed', 'halted', 'awaiting_human'].includes(e.status)) setBusy(-1);
+      break;
+    }
+
+    case 'routed':
+      endTokens();
+      add('routed', 'routed', `${e.role}${e.needs_pixels ? '  (needs pixels)' : ''}`);
+      break;
+
+    case 'attempt_started':
+      endTokens();
+      add('info', 'attempt', `#${e.index}  ${e.role}  ${e.model_id}`);
+      break;
+
+    case 'attempt_finished': {
+      endTokens();
+      const ok = e.verdict === 'pass';
+      const t = tasks.get(e.task_id);
+      if (t) { t.attempt_count = (t.attempt_count || 0) + 1;
+               t.cost_usd = String(Number(t.cost_usd || 0) + Number(e.cost_usd || 0)); renderTasks(); }
+      add(ok ? 'pass' : 'fail', 'verdict',
+          `${e.verdict}  [${e.failure_class}]  $${Number(e.cost_usd || 0).toFixed(4)}  ${e.latency_ms}ms`);
+      break;
+    }
+
+    case 'verdict':
+      endTokens();
+      add(e.status === 'pass' ? 'pass' : 'fail', e.verifier,
+          e.status + (e.reason ? ' — ' + e.reason : ''));
+      break;
+
+    case 'token':
+      token(e.text, e.reasoning);
+      break;
+
+    case 'guard_denied':
+      endTokens();
+      add('warn', 'guard', `${e.guard} denied ${e.target} — ${e.reason}`);
+      break;
+
+    case 'budget':
+      endTokens();
+      add('warn', 'budget', `${e.scope}: $${e.spent_usd} of $${e.ceiling_usd}${e.halted ? '  HALTED' : ''}`);
+      break;
+
+    case 'log': {
+      endTokens();
+      const detail = Object.entries(e.detail || {}).map(([k, v]) => `${k}=${v}`).join('  ');
+      add(e.level === 'error' ? 'fail' : e.level === 'warn' ? 'warn' : 'info',
+          e.level === 'info' ? 'note' : e.level, [e.message, detail].filter(Boolean).join('  '));
+      break;
+    }
+
+    case 'journal_written':
+      break;  // real but not interesting to watch
+
+    case 'dropped':
+      endTokens();
+      add('gap', 'gap', `${e.count} event(s) dropped — this view fell behind`);
+      break;
+  }
+}
+
+function applySnapshot(s) {
+  document.getElementById('spend').textContent = '$' + Number(s.spend_today).toFixed(4);
+  document.getElementById('budget').textContent = '$' + Number(s.budget_day).toFixed(2);
+  document.getElementById('checkpoints').textContent = s.checkpoints;
+  const conductor = s.roles?.conductor;
+  document.getElementById('backend').textContent =
+    `${s.backend}  ·  ${conductor ? conductor.model + (conductor.free ? ' (free)' : '') : ''}`;
+  tasks = new Map((s.tasks || []).map(t => [t.task_id, t]));
+  renderTasks();
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { dot.className = 'dot live'; };
+  ws.onclose = () => { dot.className = 'dot'; setTimeout(connect, 1200); };
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.kind === 'snapshot') applySnapshot(msg.data);
+    else handle(msg);
+  };
+}
+connect();
+
+document.getElementById('submit').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const input = document.getElementById('directive');
+  const directive = input.value.trim();
+  if (!directive) return;
+  input.value = '';
+  const res = await fetch('/api/tasks', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ directive }),
+  });
+  if (!res.ok) add('fail', 'error', `submit failed: ${res.status}`);
+});
+</script>
+</body>
+</html>
