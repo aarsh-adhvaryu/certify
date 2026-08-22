@@ -10,6 +10,8 @@
 root = "workspace"
 
 [execution]
+# The whole point of this config directory.
+plane = "claude_code"
 # "windows" or "wsl:<distro>". Perception stays Windows-native either way.
 backend = "windows"
 command_timeout_seconds = 300.0

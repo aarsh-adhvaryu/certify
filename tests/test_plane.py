@@ -26,7 +26,8 @@ from aop.core.ids import FrozenClock, SequentialIds
 from aop.core.schemas import FailureClass, Role, TaskSpec, Verdict
 from aop.core.state import StateStore
 from aop.execution import EscalationLadder, PlaneOutcome, build_toolbox
-from aop.execution.worker import WorkerResult
+from aop.execution.claude_code import ClaudeCodeUnavailable
+from aop.execution.worker import Worker, WorkerResult
 from aop.guards import PathJail
 from aop.memory.logbook import Logbook
 from aop.operator import Operator
@@ -270,19 +271,29 @@ def test_the_default_plane_is_the_one_that_exists():
     assert ExecutionPolicy().plane == "internal"
 
 
-def test_selecting_an_unbuilt_plane_refuses_rather_than_falling_back(tmp_path):
+def test_an_unavailable_plane_refuses_rather_than_falling_back(tmp_path):
     """A silent fallback is the one failure this seam cannot tolerate.
 
     The whole reason the setting exists is to measure one plane against another.
     A run that quietly used the internal plane while the report said `claude_code`
     would not be a bug in execution — it would be a wrong answer to the question
     the eval was run to settle.
+
+    Asserted with the Agent SDK genuinely absent, which is the state a fresh
+    checkout is in: `claude` is an optional extra precisely so the internal plane
+    keeps working without it.
     """
+    pytest.importorskip  # noqa: B018 - documents that the negative case is the point
     settings = load_settings(PROJECT_CONFIG, project_root=tmp_path)
     settings.policy.execution.plane = "claude_code"
 
-    with pytest.raises(NotImplementedError, match="claude_code"):
-        Operator(settings)
+    try:
+        import claude_agent_sdk  # noqa: F401
+    except ImportError:
+        with pytest.raises(ClaudeCodeUnavailable, match="Agent SDK"):
+            Operator(settings)
+    else:  # pragma: no cover - only when the optional extra is installed
+        assert not isinstance(Operator(settings).plane, Worker)
 
 
 def test_the_internal_plane_is_the_worker(tmp_path):

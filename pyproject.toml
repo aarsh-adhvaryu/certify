@@ -26,6 +26,13 @@ shell = [
     "pywin32>=306; sys_platform == 'win32'",
 ]
 
+# The Claude Code execution plane (Slot 48b). Optional because the internal
+# plane must keep working without it — and because a graded eval that silently
+# fell back to the other plane would be a wrong answer, not a degraded one.
+claude = [
+    "claude-agent-sdk>=0.1",
+]
+
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

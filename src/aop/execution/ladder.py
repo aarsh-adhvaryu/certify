@@ -198,6 +198,18 @@ class EscalationLadder:
             )
 
             if decision.action is Action.RETRY_SAME_TIER:
+                # A transport failure means the vendor stopped answering, not
+                # that the tier was too weak. Move sideways before retrying, so
+                # the retry reaches somewhere that might actually respond. The
+                # tier is untouched and no label is written — both come from
+                # FailureClass.TRANSPORT, not from a rule repeated here.
+                if (
+                    verdict.failure_class is FailureClass.TRANSPORT
+                    and self._policy.failover_enabled
+                ):
+                    moved = self._registry.advance(role)
+                    if moved is not None:
+                        self._publish_failover(task_id, role, moved.model_id)
                 assembler.append_failure(
                     verdict.reason or "the attempt was rejected", verifier=verdict.verifier
                 )
@@ -310,6 +322,22 @@ class EscalationLadder:
                 status=verdict.status,
                 failure_class=verdict.failure_class,
                 reason=verdict.reason,
+            )
+
+    def _publish_failover(self, task_id: str, role: Role, model_id: str) -> None:
+        """Announce a sideways move.
+
+        Deliberately worded so it cannot be mistaken for an escalation in a log:
+        the tier is unchanged and this is a vendor swap, which is the distinction
+        that stops a Monday quota reset reading as "the cheap tier failed".
+        """
+        if self._bus:
+            self._bus.emit(
+                LogLine,
+                task_id=task_id,
+                level="warn",
+                message="failing over to the next vendor (same tier)",
+                detail={"role": role.value, "now": model_id},
             )
 
     def _publish_escalation(self, task_id: str, was: Role, now: Role) -> None:

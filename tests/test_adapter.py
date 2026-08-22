@@ -409,3 +409,112 @@ async def test_default_reply_covers_every_model(registry):
     async with Adapter(registry, transport=provider.transport()) as a:
         for role in (Role.LOW, Role.HIGH, Role.MAX):
             assert (await a.complete(role, HELLO)).content == "catch-all"
+
+
+# ======== transport retry — the wire is not evidence (Slot 48d prerequisite) ==
+#
+# Three separate eval runs died because one dropped connection killed a task
+# outright. The ladder had retried TRANSPORT since Slot 16; the conductor and the
+# test-author had no equivalent, so a blip during *planning* was fatal. Retrying
+# in the adapter covers every caller by construction.
+
+
+def _ok_payload():
+    return {
+        "id": "c", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"},
+                     "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+async def test_a_dropped_connection_is_retried_not_fatal(registry):
+    """The exact failure that killed three runs: ReadError mid-request."""
+    calls = {"n": 0}
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ReadError("connection reset")
+        return httpx.Response(200, json=_ok_payload())
+
+    async with Adapter(
+        registry, transport=httpx.MockTransport(flaky), retry_backoff_seconds=0.001
+    ) as a:
+        response = await a.complete(Role.LOW, [Message.user("x")])
+
+    assert response.content == "hi"
+    assert calls["n"] == 3
+
+
+async def test_retries_are_bounded_and_the_original_failure_survives(registry):
+    """Rarer, never invisible. On exhaustion it is still a TransportError, so
+    FailureClass.TRANSPORT, no escalation and no training label all still hold."""
+    calls = {"n": 0}
+
+    def always_dead(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectError("getaddrinfo failed")
+
+    async with Adapter(
+        registry, transport=httpx.MockTransport(always_dead),
+        max_retries=2, retry_backoff_seconds=0.001,
+    ) as a:
+        with pytest.raises(TransportError, match="after 2 retries"):
+            await a.complete(Role.LOW, [Message.user("x")])
+
+    assert calls["n"] == 3  # the original plus two retries
+
+
+async def test_a_refused_request_is_not_retried(registry):
+    """A 4xx is the server actively saying no. Repeating it just spends money to
+    be told no again — and on a 429 it would make things worse."""
+    calls = {"n": 0}
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(400, text="bad request")
+
+    async with Adapter(
+        registry, transport=httpx.MockTransport(refuse), retry_backoff_seconds=0.001
+    ) as a:
+        with pytest.raises(ProviderError):
+            await a.complete(Role.LOW, [Message.user("x")])
+
+    assert calls["n"] == 1
+
+
+async def test_retries_are_announced(registry):
+    """A silent retry hides a degrading network until it fails completely."""
+    def flaky(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("nope")
+
+    bus = EventBus(clock=FrozenClock(T0), ids=SequentialIds())
+    sub = bus.subscribe()
+    async with Adapter(
+        registry, transport=httpx.MockTransport(flaky), bus=bus,
+        max_retries=1, retry_backoff_seconds=0.001,
+    ) as a:
+        with pytest.raises(TransportError):
+            await a.complete(Role.LOW, [Message.user("x")])
+
+    sub.close()
+    events = [e async for e in sub]
+    assert any(e.kind is EventKind.LOG for e in events)
+    assert any("retrying" in getattr(e, "message", "") for e in events)
+
+
+async def test_retry_can_be_switched_off(registry):
+    """max_retries=0 restores the old behaviour exactly — one shot, then raise."""
+    calls = {"n": 0}
+
+    def dead(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ReadError("x")
+
+    async with Adapter(
+        registry, transport=httpx.MockTransport(dead), max_retries=0
+    ) as a:
+        with pytest.raises(TransportError):
+            await a.complete(Role.LOW, [Message.user("x")])
+    assert calls["n"] == 1

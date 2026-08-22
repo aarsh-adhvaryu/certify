@@ -424,6 +424,14 @@ class Task(Strict):
 
     note: str | None = None
 
+    failure_class: FailureClass | None = None
+    """Why a terminal failure happened — never *that* it happened.
+
+    The same distinction ``Attempt`` carries, raised to the task. Without it a
+    task killed by a dead socket is indistinguishable from one the model got
+    wrong, and anything reading task status alone will conflate an outage with
+    a capability result."""
+
     @field_validator("created_at", "updated_at", "resume_after")
     @classmethod
     def _tz_aware(cls, value: datetime | None) -> datetime | None:

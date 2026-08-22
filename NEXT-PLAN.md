@@ -373,9 +373,35 @@ quota exhaustion fails loud.
 | # | Slot | Done when |
 |---|---|---|
 | 48a | ✅ `ExecutionPlane` protocol | The ladder drives a plane that is not the `Worker` — no adapter, no `ChatResponse` |
-| 48b | `ClaudeCodePlane` — SDK call, `PreToolUse` jail hook, served identity, quota→`TRANSPORT` | A frozen acceptance file is unwritable *by Claude Code*, proven by the existing escape suite run through the hook |
-| 48c | Failover chain — role becomes a list, `TRANSPORT` moves sideways, off during eval | Pulling the Claude plug degrades to Kimi/GLM/Qwen instead of failing. This is **Slot 69 cashed early** |
+| 48b | ✅ `ClaudeCodePlane` — SDK call, `PreToolUse` jail hook, served identity, quota→`TRANSPORT` | A frozen acceptance file is unwritable *by Claude Code*, proven by the existing escape suite run through the hook |
+| 48c | ✅ Failover chain — role becomes a list, `TRANSPORT` moves sideways, off during eval | Pulling the Claude plug degrades to Kimi/GLM/Qwen instead of failing. This is **Slot 69 cashed early** |
 | 48d | `compare()` on the 11-task suite | `Comparison.promote` has an answer |
+
+### The baseline, at last — and what five attempts taught
+
+`evals/runs/deepseek.json`, 22 Aug 2026: **9/11 correct, 11/11 coverage,
+$0.5179, 111 minutes.** Four earlier attempts were lost — two to a user-initiated
+reboot, one to campus wifi, one abandoned. Each loss exposed a real defect, and
+all four are now fixed:
+
+| What broke | Fix |
+|---|---|
+| The harness scored a dead socket as a model failure — reported 55% when the true graded figure was 86% | `tasks.failure_class` (migration 3); `pass_rate` divides by **graded**; `Comparison` refuses a verdict when two runs graded different sets |
+| One blip during *planning* killed a whole task; the ladder retried `TRANSPORT`, the conductor never did | Bounded retry in `Adapter` — covers conductor, author and ladder alike. Only `httpx.HTTPError`; a 4xx is never retried |
+| A 65-minute run threw away everything on interruption | `<out>.partial` written atomically after every task; resumes on re-run; wire-killed tasks re-run rather than restore |
+| `test_author_role = "low"` would break the instant `low` became `claude_code` | Moved to `conductor` — the one role guaranteed to stay on HTTP, and a stronger author/implementer split |
+
+**Two findings from the baseline itself.** `topk-shortfall` is a genuine
+capability failure (four attempts, ladder exhausted). `underspecified` — *"Make
+the retriever better."* — was expected to be handed back and **completed
+instead, twice running**. The conductor accepts vague work and the gate certifies
+it. That is the `acceptance: []` failure in a new costume and deserves its own
+slot.
+
+**Cost calibration.** Estimates went $0.06 → $0.12 → $0.29 → $0.45 against an
+actual **$0.5179**; every one was low. Budget **~$0.05/task**. The refusal tasks
+are the expensive ones — `impossible-offline` $0.115 and `underspecified` $0.079
+are a third of the bill.
 
 **Prerequisite unchanged:** a clean DeepSeek baseline. The 13 August attempt was
 interrupted and is unusable.
@@ -404,7 +430,49 @@ Three decisions worth keeping:
   the internal plane while the report said `claude_code` would not be an execution
   bug — it would be a wrong answer to the question the eval exists to settle.
 
-### Slot 48b, designed — `ClaudeCodePlane`
+### Slot 48b, built — `ClaudeCodePlane`
+
+`src/aop/execution/claude_code.py`. **725 tests green**, none of which need the
+SDK, a subscription, or a `claude` binary — `query` is injected at the one seam
+the plane uses.
+
+**The plan tier was never actually a blocker.** It decides which model ids go in
+`registry.toml`, and those must not be written here anyway. The plane reads
+`registry.model_id(role)` and passes it to `ClaudeAgentOptions.model`, so it is
+tier-agnostic: answering the tier question is now a config edit against a built,
+tested plane.
+
+Five things worth keeping:
+
+- **The jail is reused, not re-expressed.** The hook calls
+  `PathJail.resolve_for_write` — one method, already escape-tested. The Slot 17
+  escape suite is re-run *through the hook* (traversal, UNC, device names, ADS,
+  absolute paths), plus the frozen-file case. Restating the rule as SDK deny
+  globs would be a second implementation of a rule that has already failed once
+  here, and the two would drift.
+- **Quota exhaustion raises `AdapterError`**, which the ladder already classes
+  `TRANSPORT`. So 48b and 48c compose with no extra wiring: out of credit
+  retries here, never climbs, never trains, and fails over sideways.
+- **The quota markers are a guess and say so.** Subtypes are snake_case while
+  prose is spaced, so matching flattens separators — without that,
+  `error_usage_limit_reached` silently fails to match `"usage limit"`. A missed
+  marker is the expensive direction: the run would be graded as a verifier
+  failure, climb for nothing, and label a model that never ran. When a real
+  exhaustion is seen, paste its text into the test rather than widening the list
+  blind.
+- **`setting_sources=[]`.** A personal allow rule in `~/.claude` would silently
+  change what a graded run is permitted to do.
+- **The SDK is an optional extra** (`pip install 'aop[claude]'`). Absent, the
+  internal plane is unaffected and selecting `claude_code` raises
+  `ClaudeCodeUnavailable` rather than quietly running somewhere else.
+
+`ModelEntry.base_url` is now optional for `LOCAL_PROVIDERS`, with a model
+validator that still requires an endpoint for every HTTP provider — a deleted
+base_url should fail at load, not at the first dispatch.
+
+Original design follows.
+
+### Slot 48b, as designed
 
 **New:** `src/aop/execution/claude_code.py`. **Dependency:** `claude-agent-sdk`
 (add to `pyproject.toml`; not currently installed).
@@ -470,30 +538,56 @@ Claude Code**, driven through the existing escape suite rather than a happy path
 tiers may give one, in which case 48d measures "Claude Code vs our tool loop"
 rather than "their ladder vs ours". Both are valid experiments.
 
-### Slot 48c, designed — the failover chain
+### Slot 48c, built — the failover chain
 
-**Fully unblocked** — no key, no subscription, no baseline. Testable end to end
-against `tests/config/` with two mock roles.
+**693 tests green.** Slot 69 cashed early, widened from the conductor to every
+role. The shipped `config/registry.toml` is untouched: every role has a chain of
+one, `advance()` returns `None`, and the behaviour is exactly what it was.
 
-- A role becomes a **list** in `config/registry.toml`, not a single entry. The
-  registry is the right home: it is already "the only path from a role slot to a
-  model identity".
-- `Registry` gains a sideways axis alongside `tier_for` / `escalate`.
-- The ladder moves **sideways on `TRANSPORT`**, **up on `VERIFIER`**.
-- Kimi, GLM and Qwen are OpenAI-dialect, so they reuse the existing `openai`
-  shim — **registry entries, not transport code.**
-- The fallback *is* the internal plane, which is why 48a's protocol is the
-  failover seam rather than merely tidy.
+`ModelEntry.fallback` is a list of same-strength vendors. `Registry` gained
+`chain` / `advance` / `has_fallback` / `reset`, and `entry()` now resolves
+through an active-vendor pointer, so **model id, prices, capabilities and
+credentials all move together** — a sideways step re-prices and re-credentials
+itself with no further wiring.
 
-**Failover is off during eval.** A suite run that fails over halfway reports
-`label="claude_code"` while half the tasks ran on Kimi, and `Comparison` silently
-measures a blend. Quota exhaustion during `aop eval` fails loud.
+The ladder change is four lines: on `RETRY_SAME_TIER` where the class is
+`TRANSPORT`, advance the vendor first. No new `Action` was needed —
+`core/failures.decide()` already routed transport failures to a same-tier retry
+with `trains_router=False`, so the two axes were **already** separated and this
+slot only had to use the separation:
+
+| Trigger | Class | Move |
+|---|---|---|
+| gate rejected the work | `VERIFIER` | **up** a tier, trains the router |
+| quota / credit / transport dead | `TRANSPORT` | **sideways**, trains nothing |
+
+Four decisions worth keeping:
+
+- **The vendor pointer is process-wide, not per-task.** Running out of credit is
+  a property of the vendor and the key, not of the task that discovered it.
+  Per-task state looks tidier and makes every concurrent task pay its own failed
+  dispatch to learn the same fact. `test_the_vendor_pointer_is_process_wide`
+  pins this down, because it is the obvious thing for a later refactor to
+  "clean up".
+- **The chain is flat.** A fallback may not declare its own fallback — a tree
+  has no obvious traversal order, so "which vendor is next" would stop being
+  answerable and the answer would depend on where the failure happened.
+- **`advance()` reports exhaustion rather than wrapping.** Wrapping to the
+  primary would loop forever on a vendor already known dead.
+- **`reset()` exists although nothing calls it on a timer.** Quota comes back;
+  without it one bad afternoon pins the process to its last-resort vendor until
+  restart.
+
+**Failover is off during eval**, pinned by `Harness` itself on a deep copy rather
+than trusted to config, and recorded as `RunReport.failover` so a reader never
+has to wonder whether the numbers are a blend. A run that half-finished on Kimi
+while labelled `claude_code` is the exact mistake the harness exists to prevent.
 
 **Budget guard:** dormant at flat rate, live the instant failover spends dollars.
 
 Only a DeepSeek key exists today. [PRICING.md](PRICING.md) has verified prices
-and paste-ready blocks for Kimi and Qwen; GLM was never researched. Build the
-mechanism, configure with what exists, add rungs as **config edits** later.
+and paste-ready blocks for Kimi and Qwen; GLM was never researched. The mechanism
+is built — adding a rung is now a **config edit**, which is the whole point.
 
 ## Block K — Voice (Slots 49–53)
 

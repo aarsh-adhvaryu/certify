@@ -42,7 +42,7 @@ from aop.core.schemas import (
     hash_directive,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class StateError(Exception):
@@ -142,6 +142,22 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX idx_spend_at ON spend(at);
         """,
     ),
+    (
+        3,
+        """
+        -- WHY a task ended, not merely that it did.
+        --
+        -- Every other layer already carries this: `attempts.failure_class` is
+        -- what stops a guard trip escalating a tier or training the router. The
+        -- task record had no equivalent, so a run killed by a dead socket was
+        -- indistinguishable from one the model got wrong — and the eval harness
+        -- scored them the same, reporting a network outage as a 45% pass rate.
+        --
+        -- Nullable: only a terminal failure has a class, and tasks that end well
+        -- have nothing to say here.
+        ALTER TABLE tasks ADD COLUMN failure_class TEXT;
+        """,
+    ),
 )
 
 
@@ -179,6 +195,9 @@ def _task_from_row(row: aiosqlite.Row) -> Task:
         suspended_reason=row["suspended_reason"],
         resume_after=_dt_in(row["resume_after"]),
         note=row["note"],
+        failure_class=(
+            FailureClass(row["failure_class"]) if row["failure_class"] else None
+        ),
     )
 
 
@@ -368,7 +387,8 @@ class StateStore:
             UPDATE tasks
                SET directive = ?, directive_hash = ?, status = ?, updated_at = ?,
                    spec_json = ?, attempt_count = ?, cost_usd = ?,
-                   suspended_reason = ?, resume_after = ?, note = ?
+                   suspended_reason = ?, resume_after = ?, note = ?,
+                   failure_class = ?
              WHERE task_id = ?
             """,
             (
@@ -382,6 +402,7 @@ class StateStore:
                 task.suspended_reason,
                 _dt_out(task.resume_after),
                 task.note,
+                task.failure_class.value if task.failure_class else None,
                 task.task_id,
             ),
         )
@@ -405,8 +426,9 @@ class StateStore:
             """
             INSERT INTO tasks (task_id, directive, directive_hash, status,
                                created_at, updated_at, spec_json, attempt_count,
-                               cost_usd, suspended_reason, resume_after, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               cost_usd, suspended_reason, resume_after, note,
+                               failure_class)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(task_id) DO UPDATE SET
                 directive = excluded.directive,
                 directive_hash = excluded.directive_hash,
@@ -418,7 +440,8 @@ class StateStore:
                 cost_usd = excluded.cost_usd,
                 suspended_reason = excluded.suspended_reason,
                 resume_after = excluded.resume_after,
-                note = excluded.note
+                note = excluded.note,
+                failure_class = excluded.failure_class
             """,
             (
                 task.task_id,
@@ -433,6 +456,7 @@ class StateStore:
                 task.suspended_reason,
                 _dt_out(task.resume_after),
                 task.note,
+                task.failure_class.value if task.failure_class else None,
             ),
         )
         await self._conn.commit()

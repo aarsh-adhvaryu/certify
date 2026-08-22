@@ -21,7 +21,20 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+LOCAL_PROVIDERS = frozenset({"claude_code"})
+"""Providers that are not reached over HTTP and therefore name no endpoint.
+
+``claude_code`` runs a local agent harness against the user's own subscription:
+there is no base_url to point at and no credential of ours to send."""
 
 from aop.core.schemas import ReasoningEffort, Role
 
@@ -77,7 +90,13 @@ class ModelEntry(_Strict):
 
     provider: str
     model_id: str
-    base_url: str
+    base_url: str = ""
+    """Empty only for a provider that is not reached over HTTP.
+
+    ``claude_code`` runs a local agent harness, so there is no endpoint to name
+    and no credential of ours to send. Every other provider must give one — see
+    ``_endpoint_matches_provider``."""
+
     api_key_ref: str | None = None
     """Name of an environment variable, never a key. Providers that need no
     credential (the mock) leave this unset."""
@@ -89,6 +108,33 @@ class ModelEntry(_Strict):
 
     params: dict[str, Any] = Field(default_factory=dict)
     capabilities: Capabilities
+
+    fallback: list["ModelEntry"] = Field(default_factory=list)
+    """Vendors to move *sideways* to when this one stops answering (Slot 48c).
+
+    Tried in order on a ``TRANSPORT`` failure — quota exhausted, credit gone,
+    transport dead. Not a ladder: every entry here is meant to be the same
+    strength as the primary, because running out of credit says nothing about
+    whether the tier was strong enough.
+
+    Empty is the normal case and means "no failover for this role"."""
+
+    @field_validator("fallback")
+    @classmethod
+    def _chain_is_flat(cls, value: list["ModelEntry"]) -> list["ModelEntry"]:
+        """One level only.
+
+        A fallback with its own fallback is a tree, and a tree has no obvious
+        traversal order — which vendor is "next" stops being answerable, and the
+        answer would differ depending on where the failure happened.
+        """
+        for entry in value:
+            if entry.fallback:
+                raise ValueError(
+                    f"fallback {entry.model_id!r} declares its own fallback; "
+                    f"the chain is flat — list every vendor at the top level"
+                )
+        return value
 
     @field_validator("api_key_ref")
     @classmethod
@@ -118,14 +164,34 @@ class ModelEntry(_Strict):
     @field_validator("base_url")
     @classmethod
     def _http_scheme(cls, value: str) -> str:
-        """Every provider is reached over HTTP, including the mock.
+        """Every provider reached over HTTP says so, including the mock.
 
         Checked at load because the alternative is an obscure transport error at
         the first dispatch, long after the typo was made.
         """
-        if not value.startswith(("http://", "https://")):
+        if value and not value.startswith(("http://", "https://")):
             raise ValueError(f"base_url must be http:// or https://, got {value!r}")
         return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def _endpoint_matches_provider(self) -> ModelEntry:
+        """Only a local provider may omit ``base_url``.
+
+        Without this, a typo that deletes the endpoint silently turns an HTTP
+        provider into something with nowhere to dispatch, and the failure lands
+        at the first call rather than at load.
+        """
+        local = self.provider in LOCAL_PROVIDERS
+        if not local and not self.base_url:
+            raise ValueError(
+                f"provider {self.provider!r} is reached over HTTP and needs a base_url"
+            )
+        if local and self.base_url:
+            raise ValueError(
+                f"provider {self.provider!r} runs locally and takes no base_url, "
+                f"got {self.base_url!r}"
+            )
+        return self
 
 
 class RegistryConfig(_Strict):
@@ -191,6 +257,17 @@ class ExecutionPolicy(_Strict):
     Point this at a project's own virtualenv when the workspace has one.
     """
 
+    max_transport_retries: int = Field(default=3, ge=0)
+    """How many times a dropped connection is retried before it becomes a verdict.
+
+    A blip on the wire is not evidence about a model. Retried in the adapter so
+    the conductor, the test-author and the ladder are all covered — planning had
+    no protection at all, and one campus-wifi hiccup during planning killed a
+    whole task three separate times."""
+
+    retry_backoff_seconds: float = Field(default=1.0, gt=0)
+    """First backoff; doubles per attempt."""
+
     max_tool_iterations: int = Field(default=12, ge=1)
     """Cap on tool round-trips within a single dispatch.
 
@@ -224,6 +301,15 @@ class LadderPolicy(_Strict):
 
     max_attempts: int = Field(default=4, ge=1)
     """Hard cap across all tiers, so a doomed task cannot loop up the bill."""
+
+    failover_enabled: bool = True
+    """Whether a ``TRANSPORT`` failure may move sideways to the next vendor.
+
+    On in production: a dead vendor should not stop work when another is
+    configured. **Off during an eval**, where a run that silently half-completes
+    on a different vendor would be reported under the label of the one that was
+    asked for — a blended measurement that reads as a clean one. The harness
+    turns it off itself rather than trusting the config."""
 
 
 class BudgetPolicy(_Strict):

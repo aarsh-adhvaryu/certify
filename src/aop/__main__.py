@@ -166,7 +166,23 @@ def cmd_eval(args: argparse.Namespace) -> int:
     print(f"  mix        {suite.difficulty_mix}\n")
 
     async def main() -> int:
-        report = await Harness(suite, settings, label=args.label).run(tasks)
+        # Checkpoint beside the report by default, so an interrupted run is
+        # resumable without the caller having to think about it. Deleting the
+        # .partial file is how you force a clean start.
+        checkpoint = Path(f"{args.out}.partial") if args.out else None
+        harness = Harness(suite, settings, label=args.label, checkpoint=checkpoint)
+        resumed = len(harness._resume_from_checkpoint())
+        if resumed:
+            print(
+                f"  resuming   {resumed} task(s) already graded — "
+                f"delete {checkpoint} to start clean"
+            )
+            print()
+        report = await harness.run(tasks)
+        # The run completed, so the crash-insurance is no longer insurance —
+        # leaving it behind would silently resume a *finished* run next time.
+        if checkpoint and checkpoint.exists():
+            checkpoint.unlink()
         print(report.describe())
 
         failures = report.failures()

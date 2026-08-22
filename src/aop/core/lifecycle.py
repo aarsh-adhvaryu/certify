@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 
 from aop.core.events import EventBus, TaskCreated, TaskStatusChanged
 from aop.core.ids import Clock, SystemClock
-from aop.core.schemas import Task, TaskStatus
+from aop.core.schemas import FailureClass, Task, TaskStatus
 from aop.core.state import StateStore
 
 #: Legal transitions. Anything not listed is a bug in the caller, not a state to
@@ -179,8 +179,24 @@ class TaskLifecycle:
     async def complete(self, task_id: str, note: str | None = None) -> Task:
         return await self._transition(task_id, TaskStatus.DONE, note=note)
 
-    async def fail(self, task_id: str, reason: str) -> Task:
-        return await self._transition(task_id, TaskStatus.FAILED, reason=reason, note=reason)
+    async def fail(
+        self, task_id: str, reason: str, *, failure_class: FailureClass | None = None
+    ) -> Task:
+        """End a task badly, recording *why* alongside *that*.
+
+        ``failure_class`` is not decoration. A task killed by a dead socket and a
+        task the model got wrong both land here, and anything reading status
+        alone will treat an outage as a capability result — which is how a
+        network drop becomes a pass-rate.
+        """
+        task = await self._transition(
+            task_id, TaskStatus.FAILED, reason=reason, note=reason
+        )
+        if failure_class is not None:
+            task = await self._store.save_task(
+                task.model_copy(update={"failure_class": failure_class})
+            )
+        return task
 
     async def halt(self, task_id: str, reason: str) -> Task:
         """Stop on a budget ceiling. Distinct from failure: the task was not

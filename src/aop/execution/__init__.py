@@ -2,6 +2,9 @@
 
 from aop.execution.ladder import EscalationLadder, LadderResult, LadderStep
 from aop.execution.plane import ExecutionPlane, PlaneOutcome
+# ClaudeCodePlane is deliberately NOT re-exported here: importing it pulls the
+# optional Agent SDK seam into every `from aop.execution import ...`, and the
+# internal plane must keep working with the SDK absent. Import it by module.
 from aop.execution.tools import FileTools, ShellTools, ToolSurface, build_toolbox, describe
 from aop.execution.worker import Worker, WorkerResult, render_spec
 

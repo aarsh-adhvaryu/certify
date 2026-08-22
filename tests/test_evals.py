@@ -314,3 +314,156 @@ async def test_one_failing_task_does_not_end_the_run(tmp_path):
     assert report.total == 1
     assert report.results[0].error is not None
     assert not report.results[0].passed
+
+
+# ============ an outage is not a result (the 2026-08-20 baseline) ============
+#
+# The first real baseline reported 6/11 = 55%. Four of the five "failures" were
+# TransportErrors — DNS died mid-run — so those tasks never reached a verdict at
+# all. Over what was actually judged the figure was 6/7 = 86%.
+#
+# The orchestrator itself got this right: those runs were classed TRANSPORT,
+# escalated nothing and trained nothing. The *measuring instrument* then threw
+# the distinction away. These tests exist so it cannot happen twice.
+
+
+def test_a_task_the_wire_killed_is_not_scored_as_a_failure():
+    report = _report("r", [
+        _result(task_id="ran-ok", passed=True),
+        _result(task_id="died", passed=False, ran=False,
+                not_run_reason="TransportError: ConnectError(getaddrinfo failed)"),
+    ])
+
+    assert report.graded == 1
+    assert report.pass_rate == 1.0          # not 0.5
+    assert [r.task_id for r in report.not_run] == ["died"]
+
+
+def test_coverage_is_reported_so_a_thin_run_cannot_hide():
+    """A run at 64% coverage is not a weaker result — it is a smaller experiment,
+    and the reader has to be told which one they are looking at."""
+    report = _report("r", [_result(task_id=f"t{i}") for i in range(7)]
+                          + [_result(task_id=f"d{i}", ran=False) for i in range(4)])
+
+    assert report.total == 11
+    assert report.graded == 7
+    assert report.coverage == pytest.approx(7 / 11)
+    assert "NOT RUN    4/11" in report.describe()
+
+
+def test_a_task_that_never_ran_is_never_as_expected():
+    """Even when the suite expected it to fail. Absence of evidence is not
+    evidence — a refusal task that died on the wire was not refused."""
+    assert _result(expected_pass=False, passed=False, ran=False).as_expected is False
+
+
+def test_two_runs_that_graded_different_tasks_get_no_verdict():
+    """The failure mode this whole fix exists for.
+
+    Claude Code runs locally and *cannot* suffer a DeepSeek DNS failure, so any
+    outage in the incumbent run reads as candidate skill. Refusing a verdict is
+    the only safe answer.
+    """
+    incumbent = _report("deepseek", [
+        _result(task_id="a", passed=True),
+        _result(task_id="b", passed=False, ran=False),
+    ])
+    candidate = _report("claude_code", [
+        _result(task_id="a", passed=True),
+        _result(task_id="b", passed=True),
+    ])
+    comparison = Comparison(incumbent=incumbent, candidate=candidate)
+
+    assert comparison.comparable is False
+    assert comparison.promote is False
+    assert "NO VERDICT" in comparison.verdict()
+    assert "b" in comparison.verdict()
+
+
+def test_a_verdict_is_given_when_both_runs_graded_the_same_tasks():
+    """The guard must not block honest comparisons — a check that never passes
+    is an outage, not a safeguard."""
+    incumbent = _report("a", [_result(task_id="x", passed=True, cost_usd=Decimal("1"))])
+    candidate = _report("b", [_result(task_id="x", passed=True, cost_usd=Decimal("0.5"))])
+    comparison = Comparison(incumbent=incumbent, candidate=candidate)
+
+    assert comparison.comparable is True
+    assert comparison.promote is True
+    assert "PROMOTE" in comparison.verdict()
+
+
+def test_both_runs_losing_the_same_task_is_still_comparable():
+    """Identical coverage is comparable even when it is partial — the suite got
+    smaller, but it got smaller for both."""
+    incumbent = _report("a", [_result(task_id="x", passed=True), _result(task_id="y", ran=False)])
+    candidate = _report("b", [_result(task_id="x", passed=True), _result(task_id="y", ran=False)])
+
+    assert Comparison(incumbent=incumbent, candidate=candidate).comparable is True
+
+
+# ================= surviving an interruption (three runs lost) ================
+
+
+def _suite_of(tmp_path: Path, *ids: str) -> EvalSuite:
+    body = 'version = 1\nname = "s"\n' + "".join(
+        f'\n[[task]]\nid = "{i}"\ndirective = "do {i}"\n' for i in ids
+    )
+    return EvalSuite.load(_write_suite(tmp_path, body))
+
+
+def test_a_checkpoint_restores_graded_tasks(tmp_path):
+    """A 65-minute run must not throw away everything it paid for."""
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    cp = tmp_path / "run.json.partial"
+    prior = _report("r", [_result(task_id="a", passed=True)])
+    cp.write_text(prior.model_dump_json(), encoding="utf-8")
+
+    harness = Harness(_suite_of(tmp_path, "a", "b"), settings, checkpoint=cp)
+    assert [r.task_id for r in harness._resume_from_checkpoint()] == ["a"]
+
+
+def test_a_task_the_wire_killed_is_re_run_not_restored(tmp_path):
+    """Restoring it would bake an outage into the report permanently — the very
+    thing the ran/graded split exists to prevent."""
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    cp = tmp_path / "run.json.partial"
+    cp.write_text(
+        _report("r", [
+            _result(task_id="a", passed=True),
+            _result(task_id="b", passed=False, ran=False),
+        ]).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    harness = Harness(_suite_of(tmp_path, "a", "b"), settings, checkpoint=cp)
+    assert [r.task_id for r in harness._resume_from_checkpoint()] == ["a"]
+
+
+def test_a_corrupt_checkpoint_does_not_abort_the_run(tmp_path):
+    """A crash mid-write must not make the next attempt impossible too."""
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    cp = tmp_path / "run.json.partial"
+    cp.write_text("{ this is not json", encoding="utf-8")
+
+    harness = Harness(_suite_of(tmp_path, "a"), settings, checkpoint=cp)
+    assert harness._resume_from_checkpoint() == []
+
+
+def test_no_checkpoint_configured_is_the_old_behaviour(tmp_path):
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    harness = Harness(_suite_of(tmp_path, "a"), settings)
+    assert harness._resume_from_checkpoint() == []
+    harness._write_checkpoint(_report("r", []))  # must not raise
+
+
+def test_the_checkpoint_is_written_atomically(tmp_path):
+    """Written to .tmp then replaced, so a kill mid-write cannot corrupt it."""
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    cp = tmp_path / "nested" / "run.json.partial"
+    harness = Harness(_suite_of(tmp_path, "a"), settings, checkpoint=cp)
+
+    harness._write_checkpoint(_report("r", [_result(task_id="a")]))
+
+    assert cp.is_file()
+    assert not cp.with_suffix(cp.suffix + ".tmp").exists()
+    assert [r.task_id for r in harness._resume_from_checkpoint()] == ["a"]

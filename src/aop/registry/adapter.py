@@ -16,6 +16,7 @@ identical content for the same scripted reply.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Iterable, Sequence
 from decimal import Decimal
@@ -23,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from aop.core.events import EventBus, TokenEmitted
+from aop.core.events import EventBus, LogLine, TokenEmitted
 from aop.core.ids import Clock, SystemClock
 from aop.core.schemas import ReasoningEffort, Role, Strict
 from aop.registry.cost import CostModel, Usage
@@ -202,11 +203,15 @@ class Adapter:
         transport: httpx.AsyncBaseTransport | None = None,
         mounts: dict[str, httpx.AsyncBaseTransport] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        max_retries: int = 3,
+        retry_backoff_seconds: float = 1.0,
     ) -> None:
         self._registry = registry
         self._cost = cost_model or CostModel(registry)
         self._bus = bus
         self._clock = clock or SystemClock()
+        self._max_retries = max_retries
+        self._backoff = retry_backoff_seconds
         # ``mounts`` routes by host, so a registry mixing a real provider with the
         # mock works without a second client. A single ``transport`` still
         # overrides everything, which is what tests want.
@@ -269,6 +274,49 @@ class Adapter:
 
     # -- non-streaming (Slot 10) -------------------------------------------
 
+    async def _post_with_retry(self, url, body, headers, model_id, role):
+        """POST, retrying only the failures that are the *wire's* fault.
+
+        A dropped connection is not evidence about anything. Without this, one
+        blip during planning kills a whole task — and it did, three separate
+        times, because the ladder retries transport failures while the conductor
+        and the test-author had no equivalent protection. Retrying here rather
+        than at each call site means every caller is covered by construction.
+
+        Deliberately narrow: only ``httpx.HTTPError`` (connect failures, read
+        errors, timeouts, DNS). A 4xx/5xx is a ``ProviderError`` raised further
+        down and is NOT retried here — repeating a request the server actively
+        refused just spends money to be told no again.
+
+        Backoff is exponential from ``retry_backoff_seconds``. On exhaustion the
+        original ``TransportError`` is raised, so every downstream classification
+        — ``FailureClass.TRANSPORT``, no escalation, no training label — is
+        unchanged. This makes failures rarer, never invisible.
+        """
+        attempt = 0
+        while True:
+            try:
+                return await self._client.post(url, json=body, headers=headers)
+            except httpx.HTTPError as exc:
+                attempt += 1
+                if attempt > self._max_retries:
+                    raise TransportError(
+                        f"{model_id}: {exc!r} (after {self._max_retries} retries)"
+                    ) from exc
+                if self._bus:
+                    self._bus.emit(
+                        LogLine,
+                        level="warn",
+                        message="transport failed; retrying",
+                        detail={
+                            "model": model_id,
+                            "attempt": str(attempt),
+                            "of": str(self._max_retries),
+                            "error": repr(exc),
+                        },
+                    )
+                await asyncio.sleep(self._backoff * (2 ** (attempt - 1)))
+
     async def complete(
         self,
         role: Role | str,
@@ -284,12 +332,9 @@ class Adapter:
         )
         started = self._clock.now()
 
-        try:
-            response = await self._client.post(
-                self._url(role), json=body, headers=self._headers(role)
-            )
-        except httpx.HTTPError as exc:
-            raise TransportError(f"{entry.model_id}: {exc!r}") from exc
+        response = await self._post_with_retry(
+            self._url(role), body, self._headers(role), entry.model_id, role
+        )
 
         if response.status_code >= 400:
             raise ProviderError(response.status_code, response.text, entry.model_id)

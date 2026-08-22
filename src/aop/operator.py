@@ -41,13 +41,13 @@ from aop.core.ids import Clock, IdSource, SystemClock, UuidIds
 from aop.core.journal import Journal
 from aop.core.lifecycle import TaskLifecycle
 from aop.core.scheduler import Scheduler
-from aop.core.schemas import Role, Strict, Task, TaskSpec, TaskStatus
+from aop.core.schemas import FailureClass, Role, Strict, Task, TaskSpec, TaskStatus
 from aop.core.state import StateStore
 from aop.execution import EscalationLadder, ExecutionPlane, Worker, build_toolbox
 from aop.guards import BudgetGuard, PathJail
 from aop.memory.logbook import Logbook
 from aop.registry import Registry
-from aop.registry.adapter import Adapter, Message
+from aop.registry.adapter import Adapter, AdapterError, Message
 from aop.registry.cost import CostModel
 from aop.registry.providers import MockProvider
 from aop.router import RuleRouter
@@ -125,6 +125,8 @@ class Operator:
         self.adapter = Adapter(
             self.registry, cost_model=self.cost, bus=self.bus,
             clock=self.clock, transport=transport, mounts=mounts,
+            max_retries=settings.policy.execution.max_transport_retries,
+            retry_backoff_seconds=settings.policy.execution.retry_backoff_seconds,
         )
         self.worker = Worker(
             self.adapter, self.registry, bus=self.bus, clock=self.clock,
@@ -189,10 +191,17 @@ class Operator:
         plane = self.settings.policy.execution.plane
         if plane == "internal":
             return self.worker
-        raise NotImplementedError(
-            f"the {plane!r} execution plane is not built yet (Slot 48b); "
-            f"policy.execution.plane is currently {plane!r}"
-        )
+        if plane == "claude_code":
+            from aop.execution.claude_code import ClaudeCodePlane
+
+            return ClaudeCodePlane(
+                self.registry,
+                self.jail,
+                max_turns=self.settings.policy.execution.max_tool_iterations,
+                bus=self.bus,
+                clock=self.clock,
+            )
+        raise NotImplementedError(f"no such execution plane: {plane!r}")
 
     def _default_gate(self) -> VerifierRegistry:
         gate = VerifierRegistry()
@@ -314,17 +323,33 @@ class Operator:
         return await self.store.get_task(task.task_id)
 
     async def _guarded_run(self, task_id: str) -> RunOutcome:
-        """Never let a pipeline crash take the daemon with it."""
+        """Never let a pipeline crash take the daemon with it.
+
+        The class of the failure is recorded, not just the fact of it. An
+        ``AdapterError`` means the vendor or the wire gave out *before* the model
+        was ever judged — that is a broken tool, not a weak one, and anything
+        downstream that reads task status alone would otherwise score an outage
+        as a capability result.
+        """
         try:
             return await self.run(task_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a wedged daemon is worse
+            failure_class = (
+                FailureClass.TRANSPORT if isinstance(exc, AdapterError) else None
+            )
             self.bus.emit(
                 LogLine, task_id=task_id, level="error",
-                message="the pipeline failed", detail={"error": f"{type(exc).__name__}: {exc}"},
+                message="the pipeline failed",
+                detail={
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "failure_class": failure_class.value if failure_class else "unclassified",
+                },
             )
-            await self.lifecycle.fail(task_id, f"{type(exc).__name__}: {exc}")
+            await self.lifecycle.fail(
+                task_id, f"{type(exc).__name__}: {exc}", failure_class=failure_class
+            )
             await self.journal.write()
             return RunOutcome(task_id=task_id, action=Action.HAND_TO_HUMAN, note=str(exc))
 

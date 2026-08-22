@@ -68,12 +68,67 @@ class Registry:
         # Captured rather than read live so a mid-run environment change cannot
         # silently alter which credential a task is using.
         self._env: Mapping[str, str] = os.environ if env is None else env
+        # Which vendor in each role's chain is currently answering. Deliberately
+        # process-wide rather than per-task: running out of credit is a property
+        # of the vendor and the key, not of the task that happened to discover
+        # it. Keeping it per-task would make every concurrent task pay its own
+        # failed dispatch to learn the same fact.
+        self._active: dict[Role, int] = {}
 
     # -- resolution --------------------------------------------------------
 
     def entry(self, role: Role | str) -> ModelEntry:
-        """The model occupying a role slot. The only way to reach a model id."""
-        return self._config.roles[self._coerce(role)]
+        """The model *currently* occupying a role slot.
+
+        After a failover this is no longer the primary. Everything downstream —
+        model id, prices, credentials, capabilities — follows from here, so a
+        sideways move re-prices and re-credentials itself with no further wiring.
+        """
+        role = self._coerce(role)
+        return self.chain(role)[self._active.get(role, 0)]
+
+    # -- failover (Slot 48c) -----------------------------------------------
+
+    def chain(self, role: Role | str) -> tuple[ModelEntry, ...]:
+        """Every vendor configured for this role, primary first."""
+        primary = self._config.roles[self._coerce(role)]
+        return (primary, *primary.fallback)
+
+    def active_index(self, role: Role | str) -> int:
+        return self._active.get(self._coerce(role), 0)
+
+    def has_fallback(self, role: Role | str) -> bool:
+        """Whether anywhere is left to move sideways to."""
+        role = self._coerce(role)
+        return self.active_index(role) + 1 < len(self.chain(role))
+
+    def advance(self, role: Role | str) -> ModelEntry | None:
+        """Move this role one vendor sideways. ``None`` when the chain is spent.
+
+        Sideways, never up: the caller reaches here on a ``TRANSPORT`` failure,
+        which says the vendor stopped answering and says nothing about whether
+        the tier was strong enough. Advancing must therefore not change the tier
+        and must not write a training label — both of which are guaranteed by
+        ``FailureClass.TRANSPORT`` rather than re-derived here.
+        """
+        role = self._coerce(role)
+        if not self.has_fallback(role):
+            return None
+        self._active[role] = self.active_index(role) + 1
+        return self.entry(role)
+
+    def reset(self, role: Role | str | None = None) -> None:
+        """Point roles back at their primary vendor.
+
+        Nothing calls this on a timer yet. It exists because quota is the kind of
+        thing that comes back — a subscription resets, credit is topped up — and
+        without it a single bad afternoon pins the process to its last-resort
+        vendor until restart.
+        """
+        if role is None:
+            self._active.clear()
+        else:
+            self._active.pop(self._coerce(role), None)
 
     @staticmethod
     def _coerce(role: Role | str) -> Role:

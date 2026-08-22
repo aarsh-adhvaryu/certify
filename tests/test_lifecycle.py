@@ -13,7 +13,7 @@ import pytest
 from aop.core.events import EventBus, EventKind
 from aop.core.ids import FrozenClock, SequentialIds
 from aop.core.lifecycle import IllegalTransition, TaskLifecycle
-from aop.core.schemas import TaskStatus
+from aop.core.schemas import FailureClass, TaskStatus
 from aop.core.state import StateStore
 
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -255,3 +255,37 @@ async def test_await_human_is_reachable_from_running_and_suspended(env):
     await life.start(b.task_id)
     await life.suspend(b.task_id, "waiting")
     assert (await life.await_human(b.task_id, "gave up")).status is TaskStatus.AWAITING_HUMAN
+
+
+async def test_a_failure_records_why_not_merely_that(env):
+    """The task record carries a failure class, like every attempt already does.
+
+    Without it, a task killed by a dead socket and a task the model got wrong are
+    the same row, and anything reading status alone scores an outage as a
+    capability result. That is exactly what the 2026-08-20 baseline did.
+    """
+    life, store, _ = env
+    task = await life.create("something the network will eat")
+    await life.start(task.task_id)
+
+    await life.fail(
+        task.task_id,
+        "TransportError: deepseek-v4-pro: ConnectError('getaddrinfo failed')",
+        failure_class=FailureClass.TRANSPORT,
+    )
+
+    reloaded = await store.get_task(task.task_id)
+    assert reloaded.status is TaskStatus.FAILED
+    assert reloaded.failure_class is FailureClass.TRANSPORT
+
+
+async def test_an_unclassified_failure_stays_unclassified(env):
+    """Absent a class we say nothing rather than guessing TRANSPORT — a wrong
+    guess here would quietly excuse a genuine model failure from the score."""
+    life, store, _ = env
+    task = await life.create("a task that simply went wrong")
+    await life.start(task.task_id)
+
+    await life.fail(task.task_id, "ValueError: nope")
+
+    assert (await store.get_task(task.task_id)).failure_class is None

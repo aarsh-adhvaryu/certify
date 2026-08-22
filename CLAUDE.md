@@ -11,7 +11,7 @@ Claude Code extension.
 
 ## Start here
 
-**Live on DeepSeek. $0.081 spent to date. 679 tests green.**
+**Live on DeepSeek. ~$0.90 spent to date. 743 tests green.**
 
 ```powershell
 $env:PYTHONPATH = "d:\orchestrator\src"
@@ -23,21 +23,29 @@ editor's environment, so a "new" terminal there may still lack the key — eithe
 pull it as above or restart VS Code. `pip install -e .` removes the PYTHONPATH
 line permanently.
 
-### Two things are unfinished
+### The baseline exists — `evals/runs/deepseek.json` (22 Aug 2026)
 
-**1. The eval baseline was interrupted** (laptop shut down mid-run). It left
-**2 tasks stuck in `running`** and wrote no report. The scheduler reclaims
-orphans on start, but the baseline is not usable — re-run it from a clean slate:
+**9/11 correct, 11/11 coverage, $0.5179, 111 minutes.** The first usable
+measurement after four abandoned attempts, and the incumbent side of Slot 48d.
 
-```powershell
-Remove-Item -Recurse -Force workspace, state.db, state.db-wal, state.db-shm -ErrorAction SilentlyContinue
-python -m aop eval --label deepseek --out evals\runs\deepseek.json
-```
+Two failures, both real rather than artifacts:
 
-Budget it at **~$0.12**, not the $0.06 originally estimated — the partial run
-measured ~$0.0104/task on real suite tasks, against $0.0055 for the trivial one.
+- `topk-shortfall` — a genuine capability failure. Four attempts, full ladder
+  climb, `awaiting_human`.
+- `underspecified` — *"Make the retriever better."* was expected to be handed
+  back and instead completed, twice in a row. The conductor accepts vague work
+  and the gate certifies it: the `acceptance: []` failure mode in a new costume.
+  **Worth its own slot.**
 
-**2. The Claude Code execution plane — decided, and started.**
+`impossible-offline` was correctly refused, but on the budget ceiling rather than
+on judgement, which slightly flatters the 82%.
+
+**Budget real runs at ~$0.05/task, not $0.01.** Four successive estimates
+($0.06 → $0.12 → $0.29 → $0.45) all came in low. The refusal tasks are the
+expensive ones: `impossible-offline` $0.115 and `underspecified` $0.079 are a
+third of the bill between them.
+
+**The Claude Code execution plane — decided, built.**
 Block J2 in [NEXT-PLAN.md](NEXT-PLAN.md) carries the whole design. The answer is
 **prefer and fall back**, not replace: Claude Code becomes the preferred
 execution plane, ours stays as the fallback when the subscription is exhausted,
@@ -48,16 +56,30 @@ one subscription. **Slot 48a is done** — `execution/plane.py` is the seam.
 
 | Slot | State | Needs |
 |---|---|---|
-| 48b `ClaudeCodePlane` | designed, not built | **which Claude plan tier** — Max gives three rungs, lower tiers give one. Changes `registry.toml`, nothing else |
-| 48c failover chain | designed, not built | **nothing — fully unblocked** |
-| 48d run the comparison | — | 48b + the baseline above |
+| 48c failover chain | ✅ **built** | — |
+| 48b `ClaudeCodePlane` | ✅ **built** | — |
+| 48d run the comparison | **next** | just the candidate run — everything else is in place |
 
-**Start with 48c unless the plan tier is known.** It is registry + ladder
-mechanics (role becomes a list, `TRANSPORT` moves sideways, `VERIFIER` moves up)
-and is testable end to end against `tests/config/` with two mock roles. No key,
-no subscription, no baseline.
+**48d is all that is left in Block J2**, and it is one command:
 
-Both remaining slots are one slot each. Do not do both.
+```powershell
+$env:DEEPSEEK_API_KEY = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY","User")
+$env:PATH = "C:\Users\dnaad\.vscode\extensions\anthropic.claude-code-2.1.237-win32-x64\resources\native-binary;$env:PATH"
+Remove-Item -Recurse -Force workspace, state.db, state.db-wal, state.db-shm -ErrorAction SilentlyContinue
+.\.venv\Scripts\python.exe -m aop eval --config config-claude --label claude_code --out evals\runs\claude_code.json
+```
+
+`config-claude/` holds the candidate allocation — conductor stays on DeepSeek
+(it goes through the Adapter, not the plane), only `low`/`high`/`max` move. The
+PATH line is required: the SDK spawns `claude.EXE`, which is bundled with the VS
+Code extension and is **not** on PATH. `DEEPSEEK_API_KEY` is required for *both*
+runs because the conductor never moves.
+
+**If a run dies, re-run the identical command.** It resumes from
+`<out>.partial`, which holds every graded task and is deleted on success.
+
+Then `compare()` over the two reports. After that Block J2 closes and the next
+block is **K — Voice (Slots 49–53)**.
 
 ---
 
@@ -200,13 +222,14 @@ setting is an empirical question.
 
 ---
 
-## What exists (Blocks A–I + 48a, Slots 01–48a, 679 tests)
+## What exists (Blocks A–I + 48a/48b/48c, 743 tests)
 
 `src/aop/execution/` · `src/aop/conductor/` · `src/aop/router/`
 
 | Module | Role |
 |---|---|
 | `execution/plane.py` | `ExecutionPlane` / `PlaneOutcome` — the four facts the ladder consumes. The seam a non-`Worker` plane plugs into |
+| `execution/claude_code.py` | Claude Agent SDK plane. `PreToolUse` hook calls `resolve_for_write`; quota → `AdapterError` → `TRANSPORT`. Optional extra, never a silent fallback |
 | `execution/worker.py` | `render_spec` (deterministic, field by field) + one dispatch |
 | `execution/tools.py` | read / write / edit / list / run, all guard-wrapped |
 | `execution/ladder.py` | Executes the Slot 16 decision table. Escalation calls no conductor |
@@ -237,7 +260,7 @@ setting is an empirical question.
 
 | Module | Role |
 |---|---|
-| `registry.py` | `Registry` — the only path from a role slot to a model identity, prices, and capability tags. Modality-aware tier selection (`tier_for`, `escalate`), credentials from env by name |
+| `registry.py` | `Registry` — the only path from a role slot to a model identity, prices, and capability tags. Modality-aware tier selection (`tier_for`, `escalate`), sideways failover (`chain`, `advance`, `reset`), credentials from env by name |
 | `cost.py` | `Usage` + `CostModel`. Prices from the registry, Decimal throughout. **Missing usage raises** |
 | `adapter.py` | One HTTP client for every provider. `complete`, `stream`, `complete_streaming` |
 | `shims/` | Per-provider quirk seam. Baseline OpenAI + mock only; real vendor shims wait for Slot 41 |
@@ -376,6 +399,43 @@ drive the pipeline by hand, use `start(run_scheduler=False)`.
 record, which is why mid-ladder suspension is still not wired in: suspending
 inside a climb would lose the climb. Persisting ladder position is its own slot.
 
+**An outage is not a result, and the measuring instrument must know it.** The
+first real baseline reported 6/11 = 55%; four of the five "failures" were
+`TransportError` and had never been graded at all. The true figure over what ran
+was 6/7 = 86%. The orchestrator classed them correctly — no escalation, no
+training rows — and `Harness` then threw the distinction away by scoring
+`status is DONE`. `tasks.failure_class` (migration 3) carries it now,
+`RunReport.pass_rate` divides by **graded** rather than total, and
+`Comparison.comparable` refuses a verdict when two runs graded different task
+sets. That last guard matters because Claude Code runs locally and *cannot*
+suffer a DeepSeek DNS failure — every incumbent outage would otherwise read as
+candidate skill.
+
+**The wire is not evidence, so retry it — in the adapter, not per call site.**
+Three eval runs died because one dropped connection killed a task outright: the
+ladder had retried `TRANSPORT` since Slot 16, but the conductor and the
+test-author had no equivalent, so a blip during *planning* was fatal. Retrying in
+`Adapter` covers every caller by construction. Deliberately narrow — only
+`httpx.HTTPError`; a 4xx is a `ProviderError` and is **not** retried, because
+repeating a request the server actively refused just spends money to be told no
+again. On exhaustion it still raises `TransportError`, so every downstream
+classification is unchanged: rarer, never invisible.
+
+**A long run must survive being interrupted.** `aop eval` writes
+`<out>.partial` after **every** task, atomically, and resumes from it. A
+65-minute run whose report only materialises on the final line throws away
+everything it paid for the moment anything touches it — which happened three
+times: twice to a reboot, once to wifi. Tasks killed by the wire are deliberately
+**re-run rather than restored**, because restoring them would bake the outage
+into the report permanently.
+
+**`test_author_role` must name a role that stays on HTTP.** Authorship runs on
+the internal worker whichever execution plane is selected, so pointing it at an
+execution tier breaks the moment that tier moves to `claude_code`, which has no
+`base_url`. It is `conductor` now — which is also a stronger author/implementer
+separation than `low` ever was. Changing it mid-experiment would make two eval
+runs non-comparable, so it is fixed before the baseline, not after.
+
 **The logbook records what served, not what was configured.** `served_model_id`
 comes off the plane, never from `registry.model_id(role)`. They are the same
 today and diverge the moment failover exists — at which point recording the
@@ -386,6 +446,14 @@ registry's opinion would label every attempt with a model that never ran, and
 *up* the ladder; `TRANSPORT` (quota, credit, transport death) moves *sideways* to
 the next vendor and must never escalate or train. Confuse them and a Monday
 subscription reset reads as "the cheap tier failed four tasks in a row".
+
+**The active-vendor pointer is process-wide, not per-task.** Running out of
+credit is a property of the vendor and the key, not of the task that happened to
+discover it. Per-task state looks tidier and makes every concurrent task pay its
+own failed dispatch to learn the same fact — `test_the_vendor_pointer_is_process_wide`
+exists because this is the obvious thing for a later refactor to "clean up".
+Related: the fallback chain is **flat** (a fallback may not have its own), since
+a tree has no answerable "which vendor is next".
 
 **Authorship keeps the internal worker whichever plane is selected.** The test
 author and the implementer must not be the same actor; putting them on different
