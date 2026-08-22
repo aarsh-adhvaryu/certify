@@ -257,6 +257,15 @@ class ExecutionPolicy(_Strict):
     Point this at a project's own virtualenv when the workspace has one.
     """
 
+    claude_max_turns: int = Field(default=40, ge=1)
+    """Turn cap for the ``claude_code`` plane.
+
+    Deliberately *not* ``max_tool_iterations``. A turn there is one OpenAI-style
+    tool round-trip in our own loop; a Claude Code turn is finer-grained — read,
+    edit, run, re-read — so the same number is a much tighter budget. Six turns
+    could not create a one-line file. Hitting this cap is reported as
+    ``exhausted``: nothing finished to grade, so it retries and never escalates."""
+
     max_transport_retries: int = Field(default=3, ge=0)
     """How many times a dropped connection is retried before it becomes a verdict.
 

@@ -197,7 +197,7 @@ class Operator:
             return ClaudeCodePlane(
                 self.registry,
                 self.jail,
-                max_turns=self.settings.policy.execution.max_tool_iterations,
+                max_turns=self.settings.policy.execution.claude_max_turns,
                 bus=self.bus,
                 clock=self.clock,
             )

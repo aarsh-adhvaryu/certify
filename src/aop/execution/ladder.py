@@ -186,6 +186,10 @@ class EscalationLadder:
                 attempt_id=attempt_id,
                 latency_ms=outcome.latency_ms if outcome else 0,
                 features=features,
+                # A flat-rate plane reports a list-equivalent price. Record it —
+                # the ledger should go quiet at flat rate, not blind — but never
+                # let it consume a dollar ceiling it did not actually spend.
+                billable=not self._registry.is_free(role),
             )
             self._publish_verdict(task_id, verdict)
 

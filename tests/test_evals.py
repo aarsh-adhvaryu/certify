@@ -467,3 +467,65 @@ def test_the_checkpoint_is_written_atomically(tmp_path):
     assert cp.is_file()
     assert not cp.with_suffix(cp.suffix + ".tmp").exists()
     assert [r.task_id for r in harness._resume_from_checkpoint()] == ["a"]
+
+
+# ============ flat-rate cost, and the restricted comparison ==================
+#
+# The first real comparison reported Claude Code at $10.81 against DeepSeek's
+# $0.52 — a 20x penalty for a run that actually spent $0.31 and was therefore
+# CHEAPER. `RunReport.cost` was summing a flat-rate plane's list-equivalent
+# price as though it were money. Same class of error as scoring an outage as a
+# failure: the instrument conflating two different things.
+
+
+def test_real_cost_excludes_flat_rate_work():
+    report = _report("r", [
+        _result(task_id="a", cost_usd=Decimal("5.00"), billable_cost_usd=Decimal("0.01")),
+        _result(task_id="b", cost_usd=Decimal("3.00"), billable_cost_usd=Decimal("0.02")),
+    ])
+    assert report.cost == Decimal("0.03")
+    assert report.list_cost == Decimal("8.00")
+
+
+def test_cost_falls_back_when_nothing_was_flat_rate():
+    """A metered run must be unaffected — billable_cost_usd is None there."""
+    report = _report("r", [_result(task_id="a", cost_usd=Decimal("0.25"))])
+    assert report.cost == Decimal("0.25")
+    assert report.list_cost == Decimal("0.25")
+
+
+def test_a_cheaper_flat_rate_candidate_is_not_penalised_for_list_price():
+    """The verdict this bug would have inverted."""
+    inc = _report("deepseek", [_result(task_id="x", cost_usd=Decimal("0.52"))])
+    cand = _report("claude", [
+        _result(task_id="x", cost_usd=Decimal("10.81"), billable_cost_usd=Decimal("0.31"))
+    ])
+    c = Comparison(incumbent=inc, candidate=cand)
+    assert c.candidate.cost < c.incumbent.cost
+    assert c.promote is True
+
+
+def test_the_restricted_comparison_must_be_asked_for():
+    """The strict rule stays the headline; the narrowed one is opt-in."""
+    inc = _report("d", [_result(task_id="a", passed=True), _result(task_id="b", passed=True)])
+    cand = _report("c", [_result(task_id="a", passed=True), _result(task_id="b", ran=False)])
+    full = Comparison(incumbent=inc, candidate=cand)
+
+    assert full.comparable is False
+    assert "NO VERDICT" in full.verdict()
+
+    restricted = full.on_common_tasks()
+    assert restricted.comparable is True
+    assert restricted.incumbent.total == 1
+    assert restricted.candidate.total == 1
+
+
+def test_the_restricted_comparison_says_how_narrow_it_is():
+    """A restricted answer must never be mistakable for the full one."""
+    inc = _report("deepseek", [_result(task_id=f"t{i}") for i in range(3)])
+    cand = _report("claude", [_result(task_id="t0"), _result(task_id="t1"),
+                              _result(task_id="t2", ran=False)])
+
+    restricted = Comparison(incumbent=inc, candidate=cand).on_common_tasks()
+    assert "on 2 shared" in restricted.incumbent.label
+    assert "on 2 shared" in restricted.candidate.label

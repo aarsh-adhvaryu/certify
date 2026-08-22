@@ -27,9 +27,10 @@ from aop.core.state import StateStore
 from aop.execution import EscalationLadder, build_toolbox
 from aop.execution.claude_code import (
     ClaudeCodePlane,
+    Signals,
     build_jail_hook,
-    hit_turn_cap,
-    is_quota_exhausted,
+    find_cli,
+    usage_from,
 )
 from aop.guards import PathJail
 from aop.memory.logbook import Logbook
@@ -51,43 +52,62 @@ SPEC = TaskSpec(
 # --------------------------------------------------------------- SDK stand-ins
 
 
-class _Text:
-    def __init__(self, text: str) -> None:
-        self.type, self.text = "text", text
+sdk = pytest.importorskip("claude_agent_sdk.types")
+
+# The real SDK dataclasses, deliberately.
+#
+# The previous version of this file duck-typed them, and that is precisely how a
+# fatal bug shipped: the plane passed a plain dict where `ClaudeAgentOptions` was
+# required, every attempt died with "'dict' object has no attribute
+# 'session_store'", and the whole suite stayed green because the fake `query`
+# accepted anything. It also read `input_tokens`/`output_tokens` off
+# `ResultMessage`, which has neither, so usage was silently zero.
+#
+# CLAUDE.md already warned about exactly this — "the mock speaks HTTP, on
+# purpose… do not add a bypass path, the fast path would become the default and
+# the faithful one would rot". Constructing the genuine types costs nothing and
+# makes a field rename a pytest failure rather than a 90-minute paid discovery.
 
 
-class _Assistant:
-    def __init__(self, *texts: str) -> None:
-        self.type = "assistant"
-        self.content = [_Text(t) for t in texts]
+def _assistant(*texts: str, error: str | None = None) -> sdk.AssistantMessage:
+    return sdk.AssistantMessage(
+        content=[sdk.TextBlock(text=t) for t in texts],
+        model="test-model",
+        error=error,
+    )
 
 
-class _Result:
-    """A `ResultMessage` as the plane reads it — duck-typed on purpose.
+def _result(
+    *,
+    subtype: str = "success",
+    is_error: bool = False,
+    total_cost_usd: float | None = 0.0,
+    duration_ms: int = 900,
+    num_turns: int = 3,
+    model_usage: dict | None = None,
+    api_error_status: int | None = None,
+) -> sdk.ResultMessage:
+    return sdk.ResultMessage(
+        subtype=subtype,
+        duration_ms=duration_ms,
+        duration_api_ms=duration_ms,
+        is_error=is_error,
+        num_turns=num_turns,
+        session_id="s",
+        total_cost_usd=total_cost_usd,
+        model_usage=model_usage
+        if model_usage is not None
+        else {"m": {"inputTokens": 120, "outputTokens": 40, "cacheReadInputTokens": 0}},
+        api_error_status=api_error_status,
+    )
 
-    Constructing the real dataclass would tie the suite to an SDK version for no
-    added confidence: the plane only ever reads these attributes.
-    """
 
-    def __init__(
-        self,
-        *,
-        subtype: str = "success",
-        total_cost_usd: float | None = 0.0,
-        input_tokens: int | None = 120,
-        output_tokens: int | None = 40,
-        duration_ms: int | None = 900,
-        num_turns: int | None = 3,
-        terminal_reason: str | None = None,
-    ) -> None:
-        self.type = "result"
-        self.subtype = subtype
-        self.total_cost_usd = total_cost_usd
-        self.input_tokens = input_tokens
-        self.output_tokens = output_tokens
-        self.duration_ms = duration_ms
-        self.num_turns = num_turns
-        self.terminal_reason = terminal_reason
+def _rate_limited(status: str = "rejected") -> sdk.RateLimitEvent:
+    return sdk.RateLimitEvent(
+        rate_limit_info=sdk.RateLimitInfo(status=status, raw={}),
+        uuid="u",
+        session_id="s",
+    )
 
 
 def _query(*messages, calls: list | None = None):
@@ -226,7 +246,47 @@ def test_the_options_contain_the_workspace_and_nothing_of_the_developers(registr
     options = _plane(registry, jail).options(Role.LOW)
     assert options["cwd"] == str(jail.root)
     assert options["setting_sources"] == []
-    assert options["permission_mode"] == "acceptEdits"
+    # One gate, and it is the escape-tested one. `acceptEdits` was a second,
+    # weaker gate that the model fought instead of working: it burned turns
+    # trying to grant itself permissions and reached for paths outside the jail.
+    assert options["permission_mode"] == "bypassPermissions"
+
+
+def test_the_options_register_the_jail_hook(registry, jail):
+    """The bug that made containment theatre.
+
+    The hook was built, unit-tested and never handed to the SDK, so nothing was
+    contained while every test passed — because the tests called
+    `build_jail_hook` directly instead of going through the plane. Assert the
+    wiring, not just the component.
+    """
+    options = _plane(registry, jail).options(Role.LOW)
+    assert "PreToolUse" in options["hooks"]
+    assert options["hooks"]["PreToolUse"], "no hook registered"
+
+
+async def test_the_registered_hook_is_the_one_that_denies(registry, jail, workspace):
+    """Follow the object the plane actually passes to the SDK, and make it
+    refuse a frozen file. A hook that is registered but wrong is no better."""
+    (workspace / "frozen.py").write_text("x", encoding="utf-8")
+    jail.freeze("frozen.py")
+
+    hook = _plane(registry, jail).options(Role.LOW)["hooks"]["PreToolUse"][0]
+    result = await hook(
+        {"hook_event_name": "PreToolUse", "tool_input": {"file_path": "frozen.py"}},
+        "t",
+        None,
+    )
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_the_hook_survives_conversion_to_sdk_types(registry, jail):
+    """`sdk_options` wraps the callable in HookMatcher; a conversion that dropped
+    it would restore the exact bug this section exists for."""
+    plane = _plane(registry, jail)
+    built = plane.sdk_options(plane.options(Role.LOW))
+    assert built.hooks and "PreToolUse" in built.hooks
+    assert built.hooks["PreToolUse"][0].hooks, "HookMatcher carries no hook"
 
 
 def test_bash_is_removed_because_the_allowlist_cannot_wrap_a_shell_string(registry, jail):
@@ -256,7 +316,7 @@ def test_the_cache_split_survives_the_plane_swap(registry, jail):
 async def test_quota_exhaustion_is_a_transport_failure(registry, jail):
     """Out of credit is not a bad model. `AdapterError` is what the ladder
     already classes TRANSPORT — retry here, never climb, never train."""
-    plane = _plane(registry, jail, _Result(subtype="error_usage_limit_reached"))
+    plane = _plane(registry, jail, _rate_limited())
     with pytest.raises(AdapterError, match="quota exhausted"):
         await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
 
@@ -276,7 +336,7 @@ async def test_a_dead_stream_is_transport_not_a_verdict(registry, jail):
 
 async def test_no_result_message_is_transport(registry, jail):
     """A stream that ends without a result leaves nothing finished to grade."""
-    plane = _plane(registry, jail, _Assistant("I had a look around"))
+    plane = _plane(registry, jail, _assistant("I had a look around"))
     with pytest.raises(AdapterError, match="no result message"):
         await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
 
@@ -284,36 +344,16 @@ async def test_no_result_message_is_transport(registry, jail):
 async def test_the_turn_cap_is_not_a_verdict_about_the_work(registry, jail):
     """The loop never converged, so there is nothing finished to judge — a broken
     tool, not a weak model."""
-    plane = _plane(registry, jail, _Result(subtype="error_max_turns"))
+    plane = _plane(registry, jail, _result(subtype="error", is_error=True, num_turns=12))
     outcome = await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
     assert outcome.exhausted is True
-
-
-@pytest.mark.parametrize(
-    "subtype",
-    ["error_usage_limit_reached", "rate_limit", "error", "success"],
-)
-def test_the_quota_markers_are_written_down_so_they_can_be_corrected(subtype):
-    """These strings are a guess until a real exhaustion is seen.
-
-    The expensive direction is a miss: the run would be graded as a verifier
-    failure, climb a tier for nothing, and label a model that never ran.
-    """
-    expected = subtype != "success" and subtype != "error"
-    assert is_quota_exhausted(subtype, "") is expected
-
-
-def test_a_plain_error_is_not_assumed_to_be_a_quota_problem():
-    """Treating every error as transport would stop the ladder ever escalating."""
-    assert is_quota_exhausted("error", "the model produced invalid output") is False
-    assert hit_turn_cap("success", "") is False
 
 
 # ================================================================== the outcome
 
 
 async def test_the_outcome_satisfies_the_plane_contract(registry, jail):
-    plane = _plane(registry, jail, _Assistant("done"), _Result())
+    plane = _plane(registry, jail, _assistant("done"), _result())
     outcome = await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
 
     assert outcome.served_model_id == registry.model_id(Role.LOW)
@@ -326,7 +366,7 @@ async def test_the_outcome_satisfies_the_plane_contract(registry, jail):
 async def test_a_subscription_reports_zero_cost_without_going_dark(registry, jail):
     """At flat rate there is no per-call price. The ledger still gets a row —
     it goes quiet, not blind, and wakes the moment failover spends dollars."""
-    plane = _plane(registry, jail, _Result(total_cost_usd=None))
+    plane = _plane(registry, jail, _result(total_cost_usd=None))
     outcome = await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
 
     assert outcome.cost_usd == Decimal("0")
@@ -335,11 +375,14 @@ async def test_a_subscription_reports_zero_cost_without_going_dark(registry, jai
 
 async def test_the_spec_reaches_the_prompt(registry, jail):
     calls: list = []
-    plane = _plane(registry, jail, _Result(), calls=calls)
+    plane = _plane(registry, jail, _result(), calls=calls)
     await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
 
     assert SPEC.acceptance[0] in calls[0]["prompt"]
-    assert calls[0]["options"]["cwd"] == str(jail.root)
+    # The injected query now receives the real dataclass, which is the whole
+    # point: a dict here is what broke the first candidate run.
+    assert isinstance(calls[0]["options"], sdk.ClaudeAgentOptions)
+    assert calls[0]["options"].cwd == str(jail.root)
 
 
 # ============================================================ through the ladder
@@ -370,7 +413,7 @@ async def test_quota_exhaustion_does_not_climb_the_ladder(registry, jail, tmp_pa
     gate.register(_Gate(Verdict.passed("pytest")))
 
     ladder = EscalationLadder(
-        _plane(registry, jail, _Result(subtype="error_usage_limit_reached")),
+        _plane(registry, jail, _rate_limited()),
         gate,
         registry,
         Logbook(store, clock=FrozenClock(T0, step=timedelta(0)), ids=SequentialIds()),
@@ -418,3 +461,114 @@ def test_an_http_provider_still_needs_an_endpoint():
             model_id="whatever",
             capabilities={"context_window": 1000},
         )
+
+
+# ============ the tests that would have caught the shipped bug ================
+
+
+def test_the_options_dict_builds_a_real_sdk_options_object(registry, jail):
+    """The bug that cost a whole eval run.
+
+    `query(options=...)` takes a `ClaudeAgentOptions` dataclass. The plane built
+    a dict for assertability and passed it straight through; every attempt died
+    with "'dict' object has no attribute 'session_store'". Constructing the real
+    type here means a wrong or renamed field is a pytest failure.
+    """
+    plane = _plane(registry, jail)
+    opts = plane.options(Role.LOW)
+    opts["system_prompt"] = "you are a worker"
+
+    built = plane.sdk_options(opts)
+
+    assert isinstance(built, sdk.ClaudeAgentOptions)
+    assert built.cwd == str(jail.root)
+    assert built.model == registry.model_id(Role.LOW)
+    assert built.setting_sources == []
+    assert built.disallowed_tools == ["Bash"]
+
+
+def test_every_option_we_set_is_a_real_sdk_field(registry, jail):
+    """Guards against the SDK renaming something under us."""
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(sdk.ClaudeAgentOptions)}
+    plane = _plane(registry, jail)
+    assert set(plane.options(Role.LOW)) <= fields
+
+
+async def test_usage_is_read_from_where_the_sdk_actually_puts_it(registry, jail):
+    """`ResultMessage` has no input_tokens/output_tokens. Reading those recorded
+    zero for every attempt — a silent hole in the router's training data."""
+    plane = _plane(registry, jail, _result(), calls=None)
+    outcome = await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
+
+    assert outcome.usage.tokens_in == 120
+    assert outcome.usage.tokens_out == 40
+
+
+def test_usage_falls_back_to_the_flat_dict_shape():
+    """Older SDK builds report a flat `usage` dict instead of `model_usage`."""
+    class _Old:
+        model_usage = None
+        usage = {"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 1}
+
+    u = usage_from(_Old())
+    assert (u.tokens_in, u.tokens_out, u.cached_in) == (7, 3, 1)
+
+
+async def test_a_rejected_rate_limit_is_quota_not_a_verdict(registry, jail):
+    """Structural, from RateLimitEvent — not a substring match on prose."""
+    plane = _plane(registry, jail, _rate_limited(), _result())
+    with pytest.raises(AdapterError, match="quota exhausted"):
+        await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
+
+
+async def test_a_rate_limit_warning_is_not_exhaustion(registry, jail):
+    """'allowed_warning' means approaching the ceiling, not refused. Treating it
+    as exhaustion would fail over while the vendor was still answering."""
+    plane = _plane(registry, jail, _rate_limited("allowed_warning"), _result())
+    outcome = await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
+    assert outcome.served_model_id == registry.model_id(Role.LOW)
+
+
+@pytest.mark.parametrize("err", ["rate_limit", "billing_error"])
+async def test_vendor_errors_are_transport(registry, jail, err):
+    plane = _plane(registry, jail, _assistant("x", error=err), _result())
+    with pytest.raises(AdapterError, match="quota exhausted"):
+        await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
+
+
+async def test_an_unauthenticated_cli_says_so(registry, jail):
+    """Not transport and not capability — retrying will never fix it, so the
+    message names the actual remedy."""
+    plane = _plane(registry, jail, _assistant("x", error="authentication_failed"), _result())
+    with pytest.raises(AdapterError, match="not logged in"):
+        await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
+
+
+async def test_a_server_error_is_transport_not_a_weak_model(registry, jail):
+    plane = _plane(registry, jail, _result(is_error=True, api_error_status=503))
+    with pytest.raises(AdapterError, match="upstream 503"):
+        await plane.run(Role.LOW, SPEC, _assembler(), build_toolbox(jail))
+
+
+def test_a_missing_cli_is_detected_up_front(monkeypatch, registry, jail):
+    """The plane hung for five minutes with zero attempts when PATH pointed at a
+    deleted extension directory. A missing binary must cost a second, not a run."""
+    import aop.execution.claude_code as mod
+
+    monkeypatch.setattr(mod.shutil, "which", lambda _: None)
+    with pytest.raises(mod.ClaudeCodeUnavailable, match="on PATH"):
+        ClaudeCodePlane(registry, jail)
+
+
+def test_the_cli_is_found_by_name_never_by_pinned_version():
+    """A hardcoded ...claude-code-2.1.237... path broke within hours when the
+    extension updated to 2.1.239 and deleted the old directory."""
+    import inspect
+
+    import aop.execution.claude_code as mod
+
+    source = inspect.getsource(mod)
+    assert "2.1." not in source
+    assert "shutil.which" in source

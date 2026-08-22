@@ -55,7 +55,14 @@ supports_caching = true
 # plane does not send pixels yet, and claiming otherwise would route visual work
 # somewhere it fails silently.
 #
-# IF YOUR PLAN IS NOT MAX: put the same model in all three. Escalation then
+# THIS PLAN IS PRO (confirmed from ~/.claude/.credentials.json:
+# claudeAiOauth.subscriptionType = "pro"), so all three rungs are Sonnet.
+# Opus is not reliably available on Pro, and an escalation that failed on
+# entitlement would look like a capability failure — a false datum about the
+# plane rather than a true one about the model.
+#
+# Consequence for Slot 48d: this measures "Claude Code vs our tool loop",
+# NOT "their ladder vs ours". Escalation then
 # retries with the failure appended without actually getting stronger — the same
 # honest limitation the DeepSeek phase carries, and it must not be mistaken for
 # a working ladder.
@@ -63,7 +70,7 @@ supports_caching = true
 
 [roles.low]
 provider = "claude_code"
-model_id = "claude-haiku-4-5-20251001"
+model_id = "claude-sonnet-5"
 
 [roles.low.capabilities]
 context_window = 200000
@@ -85,7 +92,7 @@ supports_caching = true
 
 [roles.max]
 provider = "claude_code"
-model_id = "claude-opus-5"
+model_id = "claude-sonnet-5"
 
 [roles.max.capabilities]
 context_window = 200000

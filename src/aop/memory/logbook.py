@@ -64,6 +64,7 @@ class Logbook:
         attempt_id: str | None = None,
         latency_ms: int = 0,
         features: dict[str, float] | None = None,
+        billable: bool = True,
     ) -> Attempt:
         """Append one attempt.
 
@@ -86,6 +87,7 @@ class Logbook:
             tokens_in=usage.tokens_in,
             tokens_out=usage.tokens_out,
             cost_usd=cost_usd,
+            billable=billable,
             latency_ms=latency_ms,
             started_at=started_at,
             ended_at=self._clock.now(),

@@ -375,7 +375,46 @@ quota exhaustion fails loud.
 | 48a | ✅ `ExecutionPlane` protocol | The ladder drives a plane that is not the `Worker` — no adapter, no `ChatResponse` |
 | 48b | ✅ `ClaudeCodePlane` — SDK call, `PreToolUse` jail hook, served identity, quota→`TRANSPORT` | A frozen acceptance file is unwritable *by Claude Code*, proven by the existing escape suite run through the hook |
 | 48c | ✅ Failover chain — role becomes a list, `TRANSPORT` moves sideways, off during eval | Pulling the Claude plug degrades to Kimi/GLM/Qwen instead of failing. This is **Slot 69 cashed early** |
-| 48d | `compare()` on the 11-task suite | `Comparison.promote` has an answer |
+| 48d | ✅ `compare()` on the 11-task suite | run 22 Aug 2026 — see below |
+
+### Slot 48d, run — the answer
+
+**On the 10 tasks both planes graded: DeepSeek 8/10, Claude Code 9/10.** Claude
+Code won one and lost none, and finished the suite faster (99.7 min vs 110.8).
+
+| | DeepSeek | Claude Code |
+|---|---|---|
+| correct (10 shared) | 8/10 | **9/10** |
+| real money | **$0.5179** | **$0.3096** |
+| list-equivalent | $0.5179 | $12.67 |
+| wall clock | 110.8 min | 99.7 min |
+
+**The decisive task is `topk-shortfall`:** DeepSeek burned all four attempts,
+exhausted the ladder and was handed to a human; Claude Code solved it in two.
+
+**Formal verdict is `NO VERDICT`, and that is correct.** The candidate run lost
+`unknown-intent` to a `TransportError` on the *conductor's* DeepSeek call, so it
+graded 10 against the incumbent's 11. The guard refused to read those pass-rates
+against each other, which is exactly what it was built for. `on_common_tasks()`
+is the explicitly narrowed answer above.
+
+**Cost is the opposite of what the first report claimed.** It said $10.81 vs
+$0.52 — a 20x penalty — because `RunReport.cost` summed a flat-rate plane's
+list-equivalent price as if it were money. Only the DeepSeek conductor bills on
+this configuration, so the real figures are **$0.31 vs $0.52: Claude Code is
+cheaper**, on a Pro subscription with no API key. Fixed via
+`TaskResult.billable_cost_usd`; `cost` is now real money and `list_cost` is what
+the work would cost metered.
+
+**The finding that outranks the comparison: `underspecified` failed on BOTH
+planes.** *"Make the retriever better."* was expected to be handed back; both
+completed it and the gate certified both. The executor was never the problem —
+no implementation plane can fix a conductor that accepts vague directives and a
+gate that then certifies them. **That is the next slot, and it is worth more
+than the plane swap.**
+
+**Caveat on scope.** The subscription is **Pro**, so all three rungs are Sonnet.
+This measured *Claude Code vs our tool loop*, not *their ladder vs ours*.
 
 ### The baseline, at last — and what five attempts taught
 

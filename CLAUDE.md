@@ -11,7 +11,7 @@ Claude Code extension.
 
 ## Start here
 
-**Live on DeepSeek. ~$0.90 spent to date. 743 tests green.**
+**Live on DeepSeek + Claude Code (Pro). ~$1.20 real spend to date. 757 tests green.**
 
 ```powershell
 $env:PYTHONPATH = "d:\orchestrator\src"
@@ -52,34 +52,49 @@ execution plane, ours stays as the fallback when the subscription is exhausted,
 and the ladder survives because `ClaudeAgentOptions.model` gives three tiers on
 one subscription. **Slot 48a is done** — `execution/plane.py` is the seam.
 
-### Pick up here
+### Pick up here — Block J2 is CLOSED
 
-| Slot | State | Needs |
+| Slot | State |
+|---|---|
+| 48a `ExecutionPlane` seam · 48b `ClaudeCodePlane` · 48c failover · 48d comparison | ✅ **all built and run** |
+
+**The answer (22 Aug 2026), on the 10 tasks both planes graded:**
+
+| | DeepSeek | Claude Code (Pro, Sonnet ×3) |
 |---|---|---|
-| 48c failover chain | ✅ **built** | — |
-| 48b `ClaudeCodePlane` | ✅ **built** | — |
-| 48d run the comparison | **next** | just the candidate run — everything else is in place |
+| correct | 8/10 | **9/10** |
+| real money | $0.5179 | **$0.3096** |
+| list-equivalent | $0.5179 | $12.67 |
+| wall clock | 110.8 min | 99.7 min |
 
-**48d is all that is left in Block J2**, and it is one command:
+Claude Code won one task and lost none. `topk-shortfall` is the separator:
+DeepSeek exhausted all four attempts and handed to a human; Claude Code solved it
+in two. Formal `Comparison` says **NO VERDICT** — the candidate lost
+`unknown-intent` to a conductor-side `TransportError`, so coverage was 10 vs 11
+and the guard refused to compare. `on_common_tasks()` is the narrowed answer.
+
+**Next slot is not the plane.** `underspecified` — *"Make the retriever
+better."* — was expected to be handed back and was **completed by both planes**,
+with the gate certifying both. The executor was never the problem: no
+implementation plane fixes a conductor that accepts vague directives. Fix spec
+emission (refuse under-specified directives at the checkpoint) before anything in
+Block K.
+
+Full write-up in [NEXT-PLAN.md](NEXT-PLAN.md) Block J2.
+
+**Running the claude_code plane** needs the CLI on PATH — resolve it, never pin a
+version (a hardcoded `2.1.237` broke within hours when the extension updated):
 
 ```powershell
+$cli = (Get-ChildItem "$env:USERPROFILE\.vscode\extensions\anthropic.claude-code-*-win32-x64\resources\native-binary\claude.exe" |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1).DirectoryName
+$env:PATH = "$cli;$env:PATH"
 $env:DEEPSEEK_API_KEY = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY","User")
-$env:PATH = "C:\Users\dnaad\.vscode\extensions\anthropic.claude-code-2.1.237-win32-x64\resources\native-binary;$env:PATH"
-Remove-Item -Recurse -Force workspace, state.db, state.db-wal, state.db-shm -ErrorAction SilentlyContinue
-.\.venv\Scripts\python.exe -m aop eval --config config-claude --label claude_code --out evals\runs\claude_code.json
+.\.venv\Scripts\python.exe -m aop --config config-claude eval --label claude_code --out evals\runs\claude_code.json
 ```
 
-`config-claude/` holds the candidate allocation — conductor stays on DeepSeek
-(it goes through the Adapter, not the plane), only `low`/`high`/`max` move. The
-PATH line is required: the SDK spawns `claude.EXE`, which is bundled with the VS
-Code extension and is **not** on PATH. `DEEPSEEK_API_KEY` is required for *both*
-runs because the conductor never moves.
-
-**If a run dies, re-run the identical command.** It resumes from
-`<out>.partial`, which holds every graded task and is deleted on success.
-
-Then `compare()` over the two reports. After that Block J2 closes and the next
-block is **K — Voice (Slots 49–53)**.
+Note `--config` comes **before** the subcommand. If a run dies, re-run the
+identical command: it resumes from `<out>.partial`.
 
 ---
 

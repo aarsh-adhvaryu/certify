@@ -42,6 +42,9 @@ resume_on_start = true
 # still stops a runaway loop before it matters. Raise them once there is evidence
 # of what a task actually costs — the logbook will say.
 per_task_usd = "0.10"
+# Only the DeepSeek conductor bills here; the three execution tiers are
+# flat-rate and recorded non-billable, so this ceiling now guards real money
+# only. Kept at 1.00 deliberately — it is a real guard again, not a fiction.
 per_day_usd = "1.00"
 
 [context]

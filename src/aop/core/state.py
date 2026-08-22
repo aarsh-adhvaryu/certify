@@ -42,7 +42,7 @@ from aop.core.schemas import (
     hash_directive,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class StateError(Exception):
@@ -156,6 +156,22 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         -- Nullable: only a terminal failure has a class, and tasks that end well
         -- have nothing to say here.
         ALTER TABLE tasks ADD COLUMN failure_class TEXT;
+        """,
+    ),
+    (
+        4,
+        """
+        -- Whether this call actually costs money.
+        --
+        -- A flat-rate plane still reports a list-equivalent price, and recording
+        -- it is right: the ledger should go quiet at flat rate, not blind. But
+        -- the budget guard reads this table, so counting a shadow price against
+        -- a dollar ceiling halts a run that has spent nothing. That happened:
+        -- $0.51 of "spend" against a $1.00/day ceiling, of which $0.49 was
+        -- imaginary, on a Pro subscription with no API key anywhere.
+        --
+        -- So: record everything, charge only what bills.
+        ALTER TABLE spend ADD COLUMN billable INTEGER NOT NULL DEFAULT 1;
         """,
     ),
 )
@@ -566,6 +582,7 @@ class StateStore:
             task_id=attempt.task_id,
             spend_id=f"spend_{attempt.attempt_id}",
             at=attempt.started_at,
+            billable=attempt.billable,
         )
         return attempt
 
@@ -620,6 +637,7 @@ class StateStore:
         task_id: str | None = None,
         spend_id: str | None = None,
         at: datetime | None = None,
+        billable: bool = True,
     ) -> Decimal:
         """Record one billable model call.
 
@@ -630,8 +648,9 @@ class StateStore:
         await self._conn.execute(
             """
             INSERT INTO spend (spend_id, task_id, purpose, role, model_id,
-                               tokens_in, tokens_out, cached_in, cost_usd, at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               tokens_in, tokens_out, cached_in, cost_usd, at,
+                               billable)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 spend_id or self._ids.new_id("spend"),
@@ -644,6 +663,7 @@ class StateStore:
                 cached_in,
                 str(cost_usd),
                 _dt_out(at or self._clock.now()),
+                1 if billable else 0,
             ),
         )
 
@@ -678,22 +698,29 @@ class StateStore:
         then enforce a fiction.
         """
         async with self._conn.execute(
-            "SELECT cost_usd FROM spend WHERE substr(at, 1, 10) = ?",
+            "SELECT cost_usd FROM spend "
+            "WHERE substr(at, 1, 10) = ? AND billable = 1",
             (day.isoformat(),),
         ) as cur:
             rows = await cur.fetchall()
         return sum((Decimal(r["cost_usd"]) for r in rows), Decimal("0"))
 
-    async def task_spend(self, task_id: str) -> Decimal:
-        """Everything this task has cost, including the conductor.
+    async def task_spend(self, task_id: str, *, billable_only: bool = True) -> Decimal:
+        """What this task has cost, including the conductor.
 
         Reads the spend ledger rather than the attempt rows. Summing attempts
         counted only execution and left planning and test authorship outside the
         ceiling entirely.
+
+        ``billable_only`` is the default because the budget guard is the main
+        caller and a ceiling must only stop real money. Pass False for reporting,
+        where the flat-rate plane's list-equivalent price is the interesting
+        number — it is what a run *would* have cost without the subscription.
         """
-        async with self._conn.execute(
-            "SELECT cost_usd FROM spend WHERE task_id = ?", (task_id,)
-        ) as cur:
+        sql = "SELECT cost_usd FROM spend WHERE task_id = ?"
+        if billable_only:
+            sql += " AND billable = 1"
+        async with self._conn.execute(sql, (task_id,)) as cur:
             rows = await cur.fetchall()
         return sum((Decimal(r["cost_usd"]) for r in rows), Decimal("0"))
 

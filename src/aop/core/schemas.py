@@ -287,6 +287,16 @@ class Attempt(Strict):
     tokens_out: int = 0
     cost_usd: Decimal = Decimal("0")
 
+    billable: bool = True
+    """Whether this attempt's cost is real money.
+
+    False on a flat-rate plane, where ``cost_usd`` is a list-equivalent shadow
+    price. Recorded either way so the ledger stays informative, but the budget
+    guard must only ever stop real spend — a $1.00/day ceiling once halted a run
+    that had spent $0.02, because $0.49 of imaginary cost was counted against it.
+    """
+
+
     latency_ms: int = 0
     started_at: datetime
     ended_at: datetime | None = None

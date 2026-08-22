@@ -35,6 +35,7 @@ somewhere else.
 
 from __future__ import annotations
 
+import shutil
 import time
 from decimal import Decimal
 from typing import Any, Protocol
@@ -92,53 +93,116 @@ def _load_query() -> Query:
     return query
 
 
+def find_cli() -> str | None:
+    """Where the ``claude`` binary is, or None.
+
+    The SDK spawns the CLI as a subprocess and searches PATH for it. When it is
+    missing the failure surfaces late and badly — a task sat wedged for five
+    minutes with zero attempts logged, because nothing checks up front. Checked
+    at construction instead, so a misconfigured PATH costs a second.
+
+    Not resolved to a fixed path deliberately: the VS Code extension ships its
+    own copy under a **version-numbered** directory, so pinning one works until
+    the next update silently deletes it — which is exactly what happened.
+    """
+    return shutil.which("claude")
+
+
+def require_cli() -> str:
+    found = find_cli()
+    if found is None:
+        raise ClaudeCodeUnavailable(
+            "the claude_code plane needs the `claude` CLI on PATH — the Agent "
+            "SDK spawns it. Install it, or add the VS Code extension's bundled "
+            "copy (…/anthropic.claude-code-*/resources/native-binary) to PATH. "
+            "Do not hardcode a version: extension updates delete the old one."
+        )
+    return found
+
+
 # -- classification ---------------------------------------------------------
 
-_QUOTA_MARKERS = (
-    "usage limit",
-    "rate limit",
-    "quota",
-    "credit balance",
-    "insufficient",
-    "overloaded",
-    "429",
-)
-"""Substrings that mean *the vendor stopped answering*, not *the model was wrong*.
+QUOTA_ERRORS = frozenset({"rate_limit", "billing_error"})
+"""``AssistantMessage.error`` values that mean *the vendor stopped*, not *the
+model was wrong*.
 
-**These are a guess and must be checked against a real exhaustion before being
-trusted.** A marker that fails to match is the expensive direction: the run would
-be graded as a verifier failure, climb a tier for no reason, and write a training
-label about a model that never ran. When a real quota error is seen, paste its
-text into ``tests/test_claude_code.py`` rather than widening this list blind.
-"""
+Taken from the SDK's own Literal, not guessed from prose. An earlier version
+matched substrings like "usage limit" against free text; the real subtypes are
+only ``success`` and ``error``, so that never would have fired. A missed quota
+marker is the expensive direction — the run gets graded as a verifier failure,
+climbs a tier for nothing, and writes a training label about a model that never
+ran."""
 
-_TURN_CAP_MARKERS = ("max_turns", "max turns", "turn limit")
+AUTH_ERRORS = frozenset({"authentication_failed"})
+"""Not transport and not capability: nothing will fix itself by retrying. Kept
+separate so it can be reported as the actionable thing it is."""
 
 
-def _haystack(subtype: str | None, text: str) -> str:
-    """Lowercased, with separators flattened to spaces.
+class Signals:
+    """What the message stream said about *why* a run ended.
 
-    SDK subtypes are snake_case (``error_usage_limit_reached``) while prose is
-    spaced ("usage limit reached"). Without flattening, a marker written one way
-    silently fails to match the other — and a missed quota marker is the
-    expensive direction.
+    Collected while iterating rather than reconstructed afterwards, because the
+    decisive facts arrive on different message types: rate limiting on a
+    ``RateLimitEvent``, vendor errors on an ``AssistantMessage``, and the
+    outcome on the ``ResultMessage``.
     """
-    joined = f"{subtype or ''} {text}".lower()
-    return joined.replace("_", " ").replace("-", " ")
+
+    def __init__(self) -> None:
+        self.rate_limited = False
+        self.assistant_error: str | None = None
+        self.text: list[str] = []
+
+    def observe(self, message: object) -> object | None:
+        """Fold one message in; returns it if it is the terminal result."""
+        info = getattr(message, "rate_limit_info", None)
+        if info is not None:
+            # 'rejected' is the vendor refusing, not merely warning.
+            if getattr(info, "status", None) == "rejected":
+                self.rate_limited = True
+            return None
+
+        error = getattr(message, "error", None)
+        if isinstance(error, str):
+            self.assistant_error = error
+
+        if hasattr(message, "total_cost_usd"):
+            return message  # ResultMessage
+
+        for block in getattr(message, "content", None) or ():
+            text = getattr(block, "text", None)
+            if text:
+                self.text.append(text)
+        return None
+
+    @property
+    def quota_exhausted(self) -> bool:
+        return self.rate_limited or self.assistant_error in QUOTA_ERRORS
+
+    @property
+    def auth_failed(self) -> bool:
+        return self.assistant_error in AUTH_ERRORS
 
 
-def is_quota_exhausted(subtype: str | None, text: str) -> bool:
-    """Whether this result means the vendor is out, in the billing sense."""
-    return any(marker in _haystack(subtype, text) for marker in _QUOTA_MARKERS)
+def usage_from(result: object) -> Usage:
+    """Tokens, from wherever this SDK version actually keeps them.
 
-
-def hit_turn_cap(subtype: str | None, text: str) -> bool:
-    """Whether the loop ran out of turns without converging.
-
-    Not a verdict about the work: there is nothing finished to grade, so the
-    ladder treats it as a broken tool rather than a weak model.
+    ``ResultMessage`` has **no** ``input_tokens``/``output_tokens`` attributes —
+    an earlier version read those and silently recorded zero for every attempt.
+    The real figures live in ``model_usage`` (camelCase ``ModelUsage`` entries,
+    one per model used) with a flat ``usage`` dict as the older shape.
     """
-    return any(marker in _haystack(subtype, text) for marker in _TURN_CAP_MARKERS)
+    per_model = getattr(result, "model_usage", None) or {}
+    tokens_in = sum(int(u.get("inputTokens", 0) or 0) for u in per_model.values())
+    tokens_out = sum(int(u.get("outputTokens", 0) or 0) for u in per_model.values())
+    cached = sum(int(u.get("cacheReadInputTokens", 0) or 0) for u in per_model.values())
+
+    if not (tokens_in or tokens_out):
+        flat = getattr(result, "usage", None) or {}
+        tokens_in = int(flat.get("input_tokens", 0) or 0)
+        tokens_out = int(flat.get("output_tokens", 0) or 0)
+        cached = int(flat.get("cache_read_input_tokens", 0) or 0)
+
+    return Usage(tokens_in=tokens_in, tokens_out=tokens_out, cached_in=cached)
 
 
 # -- the guard hook ---------------------------------------------------------
@@ -243,8 +307,16 @@ class ClaudeCodePlane:
         self._max_turns = max_turns
         self._bus = bus
         self._clock = clock or SystemClock()
-        self._query = query or _load_query()
         self._allow_shell = allow_shell
+        self._hook = build_jail_hook(jail)
+        if query is None:
+            # Fail here, not 90 minutes into a paid run. Both checks are cheap
+            # and both have already cost a real measurement: a missing SDK, and
+            # a PATH pointing at an extension version that had been updated away.
+            self._query = _load_query()
+            require_cli()
+        else:
+            self._query = query
 
     # -- options -----------------------------------------------------------
 
@@ -258,9 +330,20 @@ class ClaudeCodePlane:
             "cwd": str(self._jail.root),
             "model": self._registry.model_id(role),
             "max_turns": self._max_turns,
-            # The hook is the gate; there is no human here to answer a prompt,
-            # and `acceptEdits` still leaves deny rules and hooks in force.
-            "permission_mode": "acceptEdits",
+            # THE HOOK IS THE GATE — and it has to actually be handed to the SDK.
+            # An earlier version built the hook, unit-tested it, and never put it
+            # in the options: containment was entirely theatre while every test
+            # passed, because they called `build_jail_hook` directly instead of
+            # going through the plane. `test_the_options_register_the_jail_hook`
+            # exists so that cannot recur.
+            "hooks": {"PreToolUse": [self._hook]},
+            # `bypassPermissions` rather than `acceptEdits` because the hook is
+            # the real gate and a hook `deny` holds even here. `acceptEdits`
+            # added a second, weaker gate that the model then fought: it burned
+            # turns trying to "grant write permissions", reached for an unrelated
+            # config skill, and tried absolute paths outside the workspace. One
+            # gate, and let it be the escape-tested one.
+            "permission_mode": "bypassPermissions",
             # Never inherit the developer's own ~/.claude settings into a graded
             # run — a personal allow rule would silently change the experiment.
             "setting_sources": [],
@@ -272,6 +355,33 @@ class ClaudeCodePlane:
             # still write code, and we still run the gate ourselves.
             opts["disallowed_tools"] = ["Bash"]
         return opts
+
+    def sdk_options(self, options: dict) -> Any:
+        """Turn the assertable dict into the SDK's dataclass.
+
+        Kept as two steps on purpose. The dict is what tests inspect — it needs
+        no SDK installed and no subscription to assert that the jail root, the
+        empty ``setting_sources`` and the removed shell are all where they
+        should be. This method is the only place the real type is constructed,
+        and :func:`sdk_option_names` pins the field names so a rename in the SDK
+        fails in ``pytest`` rather than 90 minutes into a paid run.
+        """
+        from claude_agent_sdk import (  # type: ignore[import-not-found]
+            ClaudeAgentOptions,
+            HookMatcher,
+        )
+
+        payload = dict(options)
+        hooks = payload.get("hooks")
+        if hooks:
+            # No matcher: the hook runs for EVERY PreToolUse and decides for
+            # itself whether the call names a path. Matching only the write
+            # tools by name would silently exempt any future tool that can put
+            # bytes on disk — deny-by-default belongs here too.
+            payload["hooks"] = {
+                event: [HookMatcher(hooks=list(fns))] for event, fns in hooks.items()
+            }
+        return ClaudeAgentOptions(**payload)
 
     def prompt_for(self, spec: TaskSpec, assembler: ContextAssembler) -> tuple[str, str]:
         """``(system_prompt, prompt)`` — the cache split, preserved.
@@ -326,55 +436,109 @@ class ClaudeCodePlane:
         options["system_prompt"] = system
 
         started = time.monotonic()
+        signals = Signals()
         result: Any = None
-        texts: list[str] = []
+        turn_cap_hit = False
         try:
-            async for message in self._query(prompt=turn, options=options):
-                kind = getattr(message, "type", None)
-                if kind == "result" or hasattr(message, "total_cost_usd"):
-                    result = message
-                    continue
-                for block in getattr(message, "content", None) or ():
-                    text = getattr(block, "text", None)
-                    if text:
-                        texts.append(text)
+            # ClaudeAgentOptions is a dataclass, NOT a dict. Passing the dict
+            # straight through failed every attempt with an unhelpful
+            # `'dict' object has no attribute 'session_store'` — and no test
+            # caught it, because they all injected a fake `query` that accepted
+            # anything. The dict is kept for assertions; the SDK gets the type.
+            async for message in self._query(prompt=turn, options=self.sdk_options(options)):
+                found = signals.observe(message)
+                if found is not None:
+                    result = found
         except ClaudeCodeUnavailable:
             raise
-        except Exception as exc:  # noqa: BLE001 - classified below, never swallowed
-            # The transport died mid-stream. TRANSPORT, so the ladder retries
-            # here and 48c moves sideways — it is not evidence about the tier.
-            raise AdapterError(f"claude_code transport failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 - classified, never swallowed
+            # The CLI ends a failed run by *raising* ResultError rather than
+            # yielding the result message, so this is the main classification
+            # path, not an edge case. It carries subtype / terminal_reason /
+            # api_error_status precisely so callers need no string matching —
+            # and the distinctions are load-bearing:
+            #
+            #   max turns   -> nothing finished to grade. A broken tool, not a
+            #                  weak model: it must not climb and must not train.
+            #   429 / limit -> the vendor stopped. TRANSPORT, fail over sideways.
+            #   5xx         -> the wire. TRANSPORT.
+            #   anything else -> TRANSPORT, because we cannot show it was the
+            #                  model's fault, and guessing wrong writes a false
+            #                  label into the router's training set.
+            reason = getattr(exc, "terminal_reason", None)
+            subtype = getattr(exc, "subtype", None)
+            status = getattr(exc, "api_error_status", None)
+
+            if reason == "max_turns" or subtype == "error_max_turns":
+                turn_cap_hit = True
+            elif status == 429:
+                raise AdapterError(
+                    f"claude_code rate limited (429) on {served}"
+                ) from exc
+            elif status is not None and status >= 500:
+                raise AdapterError(
+                    f"claude_code upstream {status} on {served}"
+                ) from exc
+            else:
+                detail = getattr(exc, "result", None) or repr(exc)
+                raise AdapterError(
+                    f"claude_code transport failed on {served}: {detail}"
+                ) from exc
 
         latency_ms = int((time.monotonic() - started) * 1000)
+        text = "\n\n".join(signals.text)
+
+        # Vendor refusals first: none of these are evidence about the model, and
+        # two of them will not fix themselves by climbing a tier.
+        if signals.auth_failed:
+            raise AdapterError(
+                f"claude_code authentication failed on {served} — "
+                f"the CLI is not logged in; run `claude` once interactively"
+            )
+        if signals.quota_exhausted:
+            raise AdapterError(
+                f"claude_code quota exhausted on {served}: "
+                f"{signals.assistant_error or 'rate limit rejected'}"
+            )
+        if turn_cap_hit:
+            # No result message arrives on this path — the CLI raised instead.
+            # Reported as `exhausted` so the ladder treats it the way it treats
+            # our own tool-loop cap: nothing to grade, retry, never escalate.
+            return ClaudeCodeOutcome(
+                role=self._registry._coerce(role),
+                served_model_id=served,
+                usage=Usage(),
+                cost_usd=Decimal("0"),
+                latency_ms=latency_ms,
+                exhausted=True,
+                text=text,
+                turns=self._max_turns,
+            )
         if result is None:
-            raise AdapterError(
-                "claude_code returned no result message; nothing to grade"
-            )
+            raise AdapterError("claude_code returned no result message; nothing to grade")
 
-        text = "\n\n".join(texts)
-        subtype = getattr(result, "subtype", None)
-        blurb = f"{getattr(result, 'terminal_reason', '') or ''} {text}"
+        status = getattr(result, "api_error_status", None)
+        if status is not None and status >= 500:
+            raise AdapterError(f"claude_code upstream {status} on {served}")
+        if status == 429:
+            raise AdapterError(f"claude_code rate limited (429) on {served}")
 
-        if is_quota_exhausted(subtype, blurb):
-            raise AdapterError(
-                f"claude_code quota exhausted on {served}: {subtype or 'usage limit'}"
-            )
-
+        turns = getattr(result, "num_turns", 0) or 0
         outcome = ClaudeCodeOutcome(
             role=self._registry._coerce(role),
             served_model_id=served,
-            usage=Usage(
-                tokens_in=getattr(result, "input_tokens", None) or 0,
-                tokens_out=getattr(result, "output_tokens", None) or 0,
-            ),
+            usage=usage_from(result),
             # Under a subscription there is no per-call price; the SDK may still
-            # report list-equivalent cost. Recorded either way so the ledger
-            # stays complete rather than going dark at flat rate.
+            # report a list-equivalent. Recorded either way so the ledger goes
+            # quiet at flat rate rather than blind.
             cost_usd=Decimal(str(getattr(result, "total_cost_usd", None) or 0)),
             latency_ms=getattr(result, "duration_ms", None) or latency_ms,
-            exhausted=hit_turn_cap(subtype, blurb),
+            # Nothing finished to grade: a broken tool, not a weak model. The
+            # SDK only reports subtype success/error, so the turn cap is read
+            # from the count rather than from a string.
+            exhausted=bool(getattr(result, "is_error", False)) and turns >= self._max_turns,
             text=text,
-            turns=getattr(result, "num_turns", None) or 0,
+            turns=turns,
         )
 
         if text:

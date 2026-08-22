@@ -51,6 +51,15 @@ class TaskResult(Strict):
     difficulty_expected: str = ""
     error: str | None = None
 
+    billable_cost_usd: Decimal | None = None
+    """Real money, when it differs from :attr:`cost_usd`.
+
+    A flat-rate plane reports a list-equivalent price for work that bills
+    nothing. Summing the two together made the first comparison claim Claude
+    Code cost $10.81 against DeepSeek's $0.52 — a 20x penalty for a run that
+    actually spent $0.31 and was therefore *cheaper*. None means "same as
+    cost_usd": nothing was flat-rate."""
+
     ran: bool = True
     """Whether the task was ever actually judged.
 
@@ -120,6 +129,20 @@ class RunReport(Strict):
 
     @property
     def cost(self) -> Decimal:
+        """Real money. The number a budget is spent from and a comparison turns on."""
+        return sum(
+            (r.billable_cost_usd if r.billable_cost_usd is not None else r.cost_usd)
+            for r in self.results
+        ) or Decimal("0")
+
+    @property
+    def list_cost(self) -> Decimal:
+        """What the same work would have cost at list price.
+
+        Equal to :attr:`cost` unless a flat-rate plane was involved. Reported
+        beside it rather than instead of it: at flat rate the marginal price is
+        zero, but the list-equivalent is what the run would cost to reproduce
+        without the subscription — and on a metered plan it is the real bill."""
         return sum((r.cost_usd for r in self.results), Decimal("0"))
 
     @property
@@ -144,7 +167,9 @@ class RunReport(Strict):
                 f"{', '.join(r.task_id for r in self.not_run)}"
             )
             if self.not_run else "",
-            f"    cost       ${self.cost}  (${self.cost_per_task:.4f}/task)",
+            f"    cost       ${self.cost:.4f}  (${self.cost_per_task:.4f}/task)",
+            f"    list price ${self.list_cost:.4f}  (flat-rate work priced as if metered)"
+            if self.list_cost != self.cost else "",
             f"    attempts   {self.attempts}  ({self.attempts / self.total:.1f}/task)"
             if self.total else "",
             f"    wall clock {self.seconds:.1f}s",
@@ -224,6 +249,36 @@ class Comparison(Strict):
         return (
             f"KEEP INCUMBENT — candidate matched on pass-rate but costs "
             f"{self.cost_ratio:.2f}x"
+        )
+
+    def on_common_tasks(self) -> "Comparison":
+        """The same comparison, restricted to tasks *both* runs graded.
+
+        The strict rule stays the default: a run that lost tasks to the wire
+        measured a smaller suite, and reading its pass-rate against a full run
+        credits the network as skill. But refusing to say anything at all throws
+        away real evidence when the overlap is large — so this is a separate,
+        explicitly narrowed question, never the headline. The caller must ask for
+        it, and both labels record how many tasks it kept, so a restricted answer
+        cannot be mistaken for the full one.
+        """
+        common = {r.task_id for r in self.incumbent.results if r.ran} & {
+            r.task_id for r in self.candidate.results if r.ran
+        }
+        n = len(common)
+        return Comparison(
+            incumbent=self.incumbent.model_copy(
+                update={
+                    "label": f"{self.incumbent.label} (on {n} shared)",
+                    "results": [r for r in self.incumbent.results if r.task_id in common],
+                }
+            ),
+            candidate=self.candidate.model_copy(
+                update={
+                    "label": f"{self.candidate.label} (on {n} shared)",
+                    "results": [r for r in self.candidate.results if r.task_id in common],
+                }
+            ),
         )
 
     def describe(self) -> str:
