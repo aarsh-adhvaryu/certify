@@ -98,66 +98,37 @@ identical command: it resumes from `<out>.partial`.
 
 ---
 
-## Original start-here
+## History — how it got here
 
-**The goal is a Jarvis**, not a batch execution engine. See
-**[NEXT-PLAN.md](NEXT-PLAN.md)** for the re-scoped remaining work (Slots 41–73)
-and why the order changed. **Slots 41–42 are done** — there is a running daemon
-with an overlay:
+*Kept because the reasoning is useful; **superseded by "Pick up here" above**.
+Anything below that names a "next slot" is stale by definition.*
+
+**Block I (Slots 41–46b)** built the shell: service, overlay, scheduler,
+frameless window, tray, hotkey, autostart.
 
 ```powershell
-.\.venv\Scripts\python.exe -m aop serve      # daemon + overlay on :8765
-.\.venv\Scripts\python.exe -m aop run "..."  # one directive, headless
+.\.venv\Scripts\python.exe -m aop serve      # daemon + overlay, headless
+.\.venv\Scripts\python.exe -m aop app        # + tray, hotkey, window
+.\.venv\Scripts\python.exe -m aop run "..."  # one directive
 .\.venv\Scripts\python.exe -m aop status     # what it believes
 ```
 
-**Block I is complete (Slots 41–46b).** Everything buildable before the buy point
-is done: service, overlay, scheduler, frameless window, tray, hotkey, autostart.
-
-```powershell
-.\.venv\Scripts\python.exe -m aop app        # daemon + tray + hotkey + overlay
-.\.venv\Scripts\python.exe -m aop autostart on
-```
-
-**Next: Slot 47 — the buy point.** [PRICING.md](PRICING.md) carries the phased
-plan and a buy-day runbook. The **eval harness is already built** (`aop eval`),
-so the model-allocation questions are answered by measurement rather than by
-argument — run the suite, swap a role, run it again, compare.
-
-Do not buy anything or add a real `api_key_ref` yourself; that is the user's call.
+**Block J (Slot 47)** was the buy point. [PRICING.md](PRICING.md) has the
+research; DeepSeek was chosen and is live. **Block J2 (48a–48d)** added the
+execution-plane seam, the Claude Code plane, failover, and the comparison that
+closed the open architecture question.
 
 **The shell is a client and must never import the Operator** — a test asserts it
-by reading the source. That separation is what lets the window crash, the tray
-die, or the hotkey be refused without disturbing a task mid-flight.
+by reading the source. That is what lets the window crash, the tray die, or the
+hotkey be refused without disturbing a task mid-flight.
 
 `src/aop/operator.py` is the composition root: the one place that knows the order
-things happen in. Nothing there should contain logic that is not *sequencing* — if
-a rule appears in it, it belongs in the plane it came from.
+things happen in. Nothing there should contain logic that is not *sequencing* —
+if a rule appears in it, it belongs in the plane it came from.
 
-**Slots 01–40 are complete and green. Everything buildable without spending money
-is done.**
-
-**Next slot: 41 — the buy point.** The *research* is done and written up in
-**[PRICING.md](PRICING.md)**: verified prices, Artificial Analysis intelligence
-and speed figures, benchmark comparisons, endpoints, and a ready-to-paste
-registry block.
-
-**The decision is open and belongs to the user.** Three questions are listed at
-the top of PRICING.md — which model fills `high`, whether the conductor stays
-Kimi K3 or moves to something cheaper and faster, and which model sits at `max`.
-Do not pick for them, and do not buy anything.
-
-Do not add a real `api_key_ref` or `base_url` to `config/registry.toml` as a
-convenience while working on something else. The loader rejects pasted secrets,
-but the buy-point is a decision, not a side effect.
-
-Worth knowing before reading PRICING.md: the spec's prices were close to right
-(Kimi and Qwen-Max exact), and its original choice of Qwen-Max for `high` looks
-correct — it is the only affordable multimodal tier, and without one the visual
-escalation ladder has a single rung.
-
-The whole pipeline runs today on mocks at zero cost: directive → checkpoint →
-spec → router → test authorship → ladder → verdict → logbook → journal.
+**Do not add a real `api_key_ref` or `base_url` to a registry as a convenience.**
+The loader rejects pasted secrets, but a model choice is a decision, not a side
+effect.
 
 ---
 
@@ -237,7 +208,7 @@ setting is an empirical question.
 
 ---
 
-## What exists (Blocks A–I + 48a/48b/48c, 743 tests)
+## What exists (Blocks A–J2 complete, 757 tests)
 
 `src/aop/execution/` · `src/aop/conductor/` · `src/aop/router/`
 

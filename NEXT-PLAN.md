@@ -5,8 +5,11 @@ This covers 41–73, re-scoped around the Jarvis goal.*
 
 ## Context
 
-Slots 01–40 are complete: **549 tests, zero spend, whole pipeline running on
-mocks** (directive → checkpoint → spec → router → test authorship → ladder →
+*Status as of 22 Aug 2026: Blocks A–J2 complete, **757 tests**, live on DeepSeek
++ Claude Code, ~$1.20 real spend. Next block is **K — Voice**, but see the
+`underspecified` finding in Block J2 first — it outranks it.*
+
+Slots 01–40 were complete at: **549 tests, zero spend, whole pipeline on mocks** (directive → checkpoint → spec → router → test authorship → ladder →
 verdict → logbook → journal).
 
 Late in the build the actual goal surfaced: **this is meant to be a Jarvis**, not
@@ -69,8 +72,9 @@ shaped guard**, and getting this wrong deletes something unrecoverable:
 
 ## Open decision — Claude Code as the execution plane
 
-*Raised 13 August 2026, after the first live spend. Not started; this is a
-decision, not a task.*
+*Raised 13 August 2026. **ANSWERED 22 August 2026 — see Block J2 below for the
+measurement.** The reasoning is kept because several of its premises turned out
+to be wrong, and which ones is worth knowing.*
 
 **The question.** Claude Code already has a well-tuned agentic coding loop and can
 swap models itself. If the coding work is what we care about first, why run our
@@ -126,8 +130,9 @@ suite, compare pass-rate against cost graded by the same gate. `Comparison`
 already refuses to promote something cheaper-but-worse. Check the Agent SDK's
 permission API first, since that is where the jail question is answered.
 
-**Prerequisite:** a clean DeepSeek baseline. The one attempted on 13 August was
-interrupted and is unusable.
+**Prerequisite (met):** a clean DeepSeek baseline — `evals/runs/deepseek.json`,
+22 August, 9/11 at 11/11 coverage. It took five attempts; the four that failed
+each exposed a defect in the harness, and those fixes are Block J2's real legacy.
 
 ---
 
@@ -627,6 +632,40 @@ while labelled `claude_code` is the exact mistake the harness exists to prevent.
 Only a DeepSeek key exists today. [PRICING.md](PRICING.md) has verified prices
 and paste-ready blocks for Kimi and Qwen; GLM was never researched. The mechanism
 is built — adding a rung is now a **config edit**, which is the whole point.
+
+## Block J3 — the conductor's gate (Slot 48e) — DO THIS BEFORE BLOCK K
+
+*Promoted 22 Aug 2026 by the 48d result, which found it by accident.*
+
+`underspecified` — the directive **"Make the retriever better."** — is in the
+suite marked `expect_pass = false` because it should be handed back. **Both
+planes completed it and the gate certified both**, on every run, at $0.079 and
+$0.31 respectively.
+
+That is not an executor problem, and 48d proved it: swapping the entire
+implementation plane changed nothing. The conductor accepts a directive with no
+checkable content, emits a spec, authorship writes tests against whatever it
+invented, and the gate then passes work nobody can evaluate. It is the
+`acceptance: []` failure from the first live run wearing a different costume —
+that one was fixed by refusing empty criteria, and this is the same hole one
+level up: criteria that exist but assert nothing.
+
+| # | Slot | Done when |
+|---|---|---|
+| 48e | Refuse under-specified directives at the plan checkpoint | `underspecified` is handed back rather than completed, and a directive with genuine content is unaffected |
+
+**The hard part is not detecting vagueness, it is not over-refusing.** A gate
+that rejects real work is worse than one that accepts vague work, because the
+failure is silent and the user just stops trusting it. The existing
+`check_plan` (`conductor/rationale.py`) is the right home — deterministic,
+already able to refuse a plan, already carrying no weight from the model's own
+prose. Likely shape: acceptance criteria must name observable behaviour, not
+restate the goal. Test it against the whole shipped suite, since nine of those
+eleven tasks **must** still pass.
+
+Worth noting the suite already contains the regression test: `underspecified`
+and `impossible-offline` exist precisely because *"a suite of only achievable
+work cannot detect a model that agrees to anything."* It detected exactly that.
 
 ## Block K — Voice (Slots 49–53)
 
