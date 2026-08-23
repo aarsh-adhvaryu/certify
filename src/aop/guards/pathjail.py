@@ -122,9 +122,6 @@ class PathJail:
         self._frozen.add(resolved)
         return resolved
 
-    def thaw(self, path: str | Path) -> None:
-        self._frozen.discard(self.resolve(path))
-
     @property
     def frozen(self) -> frozenset[Path]:
         return frozenset(self._frozen)
@@ -140,10 +137,6 @@ class PathJail:
                 "criteria your work is graded against, so it is read-only to you",
             )
         return resolved
-
-    def ensure_root(self) -> Path:
-        self.root.mkdir(parents=True, exist_ok=True)
-        return self.root
 
     # -- the check ---------------------------------------------------------
 

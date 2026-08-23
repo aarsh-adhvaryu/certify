@@ -10,7 +10,7 @@
 # safe to commit.
 #
 # ---------------------------------------------------------------------------
-# PHASE 1 of the buy plan (PRICING.md): one vendor, all four roles.
+# One vendor for the conductor; the execution tiers are the Claude Code plane.
 #
 # DeepSeek first because prompt tuning is where tokens burn - dozens of
 # iterations getting the conductor to emit valid specs costs cents here and
@@ -74,7 +74,7 @@ supports_caching = true
 #
 # THE PLAN IS PRO, so all three rungs are Sonnet. Escalation therefore retries
 # with the failure appended rather than actually getting stronger. That is
-# honest, not a working ladder — see F-02 in NEXT-PLAN.md.
+# honest, not a working ladder — see the open findings in CLAUDE.md.
 # ---------------------------------------------------------------------------
 
 [roles.low]

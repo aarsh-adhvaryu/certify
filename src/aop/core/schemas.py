@@ -3,7 +3,7 @@
 Every record that crosses a plane boundary or lands in durable storage is
 defined here, and every one of them pins ``schema_version``. The task spec is
 the conductor-to-worker contract and it will change; without a pinned version, a
-format change silently corrupts the router's training set (BUILD-PLAN, Slot 32).
+format change silently corrupts the router's training set.
 
 Models forbid extra fields. A typo in a field name should fail at construction,
 not quietly vanish into a dict that nothing reads.

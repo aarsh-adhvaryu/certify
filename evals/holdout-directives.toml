@@ -1,7 +1,7 @@
 # Held-out directives for Slot 48e.
 #
 # WRITTEN BEFORE THE RULE, ON PURPOSE. The candidate lever recorded in
-# NEXT-PLAN.md — "does the directive name a referent that exists in the staged
+# CLAUDE.md — "does the directive name a referent that exists in the staged
 # fixture?" — separated the shipped eleven-task suite 11/11. That is not
 # evidence: the rule was derived from those same eleven tasks, two of which are
 # the refusal cases. A rule fitted to its own test set will always look perfect.

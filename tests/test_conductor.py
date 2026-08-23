@@ -673,7 +673,7 @@ def test_the_check_can_be_turned_off():
 def test_the_gate_scores_the_held_out_directives():
     """Written before the rule, and they killed the first version of it.
 
-    The candidate lever recorded in NEXT-PLAN.md — "does the directive name a
+    The candidate lever recorded in CLAUDE.md — "does the directive name a
     referent present in the staged fixture?" — scored 11/11 on the shipped suite
     it was derived from and **12/20 here**. This test is what stops that from
     happening silently again: tune the rule, re-run, see the number.

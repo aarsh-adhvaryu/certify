@@ -1,29 +1,28 @@
 [project]
 name = "aop"
 version = "0.1.0"
-description = "Agentic Operator — OS-level autonomous operator with a conductor over a tiered worker pool"
+description = "A deterministic verification layer for coding agents: guards, a frozen-test gate, and a spend ledger. Zero tokens of its own."
 requires-python = ">=3.11"
+# The core is deliberately small: the guards, the gate and the ledger are pure
+# Python and call no model. Everything that needs a network stack is an extra.
 dependencies = [
     "pydantic>=2.7",
     "aiosqlite>=0.20",
     "httpx>=0.27",
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    # Required, not optional. Uvicorn disables WebSocket support entirely when no
-    # WS library is present at startup and answers /ws with a 404 — so the overlay
-    # connects, fails silently, and shows a dead status dot forever.
-    "websockets>=12",
 ]
 
 [project.optional-dependencies]
-# The desktop shell. Optional because the overlay is only a WebSocket
-# subscriber: without these, `aop serve` still works and a browser tab is a
-# complete substitute for the frameless window.
-shell = [
-    "pywebview>=5.0",
-    "pystray>=0.19",
-    "Pillow>=10.0",
-    "pywin32>=306; sys_platform == 'win32'",
+# The local HTTP + WebSocket surface (`aop serve`), for a browser view or a
+# host wrapper to subscribe to. Not needed to verify anything.
+#
+# `websockets` belongs here as a HARD requirement of this extra, not a nicety:
+# uvicorn disables WebSocket support entirely when no WS library is present at
+# startup and answers /ws with a 404, so a subscriber connects, fails silently,
+# and shows a dead status dot forever.
+service = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "websockets>=12",
 ]
 
 # The Claude Code execution plane (Slot 48b). Optional because the internal

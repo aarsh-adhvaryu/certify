@@ -1,13 +1,13 @@
 """Command line entry point.
 
-    python -m aop app              daemon + tray + hotkey + frameless overlay
-    python -m aop serve            headless: service only, view it in a browser
+    python -m aop serve            local service, view it in a browser
     python -m aop run "<goal>"     run one directive and print the result
-    python -m aop status           what the daemon believes, without starting one
-    python -m aop autostart on     start with Windows
+    python -m aop status           what it believes, without starting anything
+    python -m aop eval <suite>     run a saved suite and report pass-rate vs cost
+    python -m aop compare a b      read two saved reports and say which won
 
 Everything runs against whatever ``config/registry.toml`` currently points at.
-While that is the mock provider, all three commands cost nothing.
+While that is the mock provider, every command costs nothing.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from pathlib import Path
 
 from aop.core.config import ConfigError, load_settings
 from aop.core.schemas import Role, TaskStatus
-from aop.daemon.shell import DEFAULT_HOTKEY
 from aop.operator import Operator
 from aop.registry.registry import Registry
 
@@ -64,7 +63,16 @@ def _banner(settings) -> str:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    from aop.service import serve
+    try:
+        from aop.service import serve
+    except ImportError as exc:
+        # The web stack is an extra, so a missing one is a configuration answer,
+        # not a crash. Everything that verifies still works without it.
+        print(
+            f"`aop serve` needs the service extra: pip install 'aop[service]'\n  ({exc})",
+            file=sys.stderr,
+        )
+        return 2
 
     settings = _load(args)
     operator = Operator(settings)
@@ -73,89 +81,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
         serve(operator, host=args.host, port=args.port)
     except KeyboardInterrupt:
         print("\nstopped")
-    return 0
-
-
-def cmd_app(args: argparse.Namespace) -> int:
-    """Service plus desktop shell.
-
-    The service runs on a background thread with its own event loop; pywebview
-    must own the main thread on Windows, so the shell blocks here.
-    """
-    import threading
-
-    import uvicorn
-
-    from aop.daemon import Shell
-    from aop.service import build_app
-
-    settings = _load(args)
-    operator = Operator(settings)
-    url = f"http://{args.host}:{args.port}"
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            build_app(operator), host=args.host, port=args.port, log_level="warning"
-        )
-    )
-    thread = threading.Thread(target=server.run, name="aop-service", daemon=True)
-    thread.start()
-
-    # Wait for the socket rather than sleeping a guessed interval — the shell
-    # opening before the service answers shows an error page on first paint.
-    import socket
-
-    for _ in range(100):
-        with socket.socket() as probe:
-            if probe.connect_ex((args.host, args.port)) == 0:
-                break
-        time.sleep(0.05)
-
-    shell = Shell(
-        url,
-        hotkey=args.hotkey,
-        project_root=_project_root(),
-        journal_path=settings.jail_root / "OPERATOR.md",
-        on_quit=lambda: setattr(server, "should_exit", True),
-    )
-    report = shell.build()
-    print(f"\nOperator\n{report.describe()}\n{_banner(settings)}\n")
-
-    if not report.window:
-        open_fallback(url)
-
-    try:
-        shell.run()
-    except KeyboardInterrupt:
-        shell.quit()
-    server.should_exit = True
-    thread.join(timeout=5)
-    return 0
-
-
-def open_fallback(url: str) -> None:
-    from aop.daemon.window import open_in_browser
-
-    open_in_browser(url)
-
-
-def cmd_autostart(args: argparse.Namespace) -> int:
-    from aop.daemon import autostart
-
-    root = _project_root()
-    if args.action == "on":
-        state = autostart.enable(root)
-    elif args.action == "off":
-        state = autostart.disable()
-    else:
-        state = autostart.status(root)
-
-    print(f"\n  autostart  {'enabled' if state.enabled else 'disabled'}")
-    if state.command:
-        print(f"  command    {state.command}")
-        if not state.matches_current:
-            print("  warning    points at a different checkout; run 'autostart on' to re-point it")
-    print()
     return 0
 
 
@@ -297,17 +222,6 @@ def main(argv: list[str] | None = None) -> int:
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
     serve_cmd.set_defaults(func=cmd_serve)
-
-    app_cmd = subs.add_parser("app", help="service plus the desktop shell")
-    app_cmd.add_argument("--host", default="127.0.0.1")
-    app_cmd.add_argument("--port", type=int, default=DEFAULT_PORT)
-    app_cmd.add_argument("--hotkey", default=DEFAULT_HOTKEY)
-    app_cmd.add_argument("--project", help="checkout to run against")
-    app_cmd.set_defaults(func=cmd_app)
-
-    auto_cmd = subs.add_parser("autostart", help="start with Windows")
-    auto_cmd.add_argument("action", choices=["on", "off", "status"], nargs="?", default="status")
-    auto_cmd.set_defaults(func=cmd_autostart)
 
     run_cmd = subs.add_parser("run", help="run one directive headless")
     run_cmd.add_argument("directive")

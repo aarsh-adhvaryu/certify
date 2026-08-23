@@ -149,11 +149,6 @@ class ContextAssembler:
             )
         )
 
-    def clear_tail(self) -> None:
-        self._tail.clear()
-
-    # -- rebuilding, explicitly -------------------------------------------
-
     def rebuild_prefix(self, instructions: str, *, reason: str) -> None:
         """Re-render the stable head on purpose.
 

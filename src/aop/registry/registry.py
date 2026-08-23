@@ -173,9 +173,6 @@ class Registry:
     def context_window(self, role: Role | str) -> int:
         return self.capabilities(role).context_window
 
-    def supports_tools(self, role: Role | str) -> bool:
-        return self.capabilities(role).tool_use
-
     def supports_reasoning_effort(self, role: Role | str) -> bool:
         """Whether the thinking-budget knob exists on this model.
 

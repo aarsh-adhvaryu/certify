@@ -19,7 +19,7 @@
 # safe to commit.
 #
 # ---------------------------------------------------------------------------
-# PHASE 1 of the buy plan (PRICING.md): one vendor, all four roles.
+# One vendor, all four roles. Prices verified 22 Aug 2026.
 #
 # DeepSeek first because prompt tuning is where tokens burn - dozens of
 # iterations getting the conductor to emit valid specs costs cents here and

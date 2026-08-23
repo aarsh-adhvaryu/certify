@@ -1,10 +1,13 @@
-"""Agentic Operator.
+"""Agentic Operator — a deterministic verification layer for coding agents.
 
-An OS-level autonomous operator: a conductor model coordinating a tiered pool of
-execution workers behind a deterministic verifier gate.
+Guards, a frozen-test gate, a falsifiability check and a spend ledger. The parts
+that decide whether work is acceptable call no model at all, which is what makes
+them portable to any host and free to run.
 
-See ``agentic-operator-spec.md`` for the design and ``BUILD-PLAN.md`` for the
-slot-by-slot build order.
+An orchestration layer — conductor, router, escalation ladder — exists alongside
+them and is optional.
+
+``CLAUDE.md`` is the design, the invariants and the plan of action.
 """
 
 __version__ = "0.1.0"
