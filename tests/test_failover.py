@@ -34,6 +34,7 @@ from aop.core.state import StateStore
 from aop.evals.harness import Harness
 from aop.evals.suite import EvalSuite, EvalTask
 from aop.execution import EscalationLadder, build_toolbox
+from aop.execution.claude_code import ClaudeCodeUnavailable
 from aop.guards import PathJail
 from aop.memory.logbook import Logbook
 from aop.registry import Registry
@@ -389,3 +390,118 @@ def test_the_eval_harness_pins_failover_off(tmp_path):
 
     assert harness.settings.policy.ladder.failover_enabled is False
     assert settings.policy.ladder.failover_enabled is True  # caller's copy untouched
+
+
+# ============ Slot 49 — a vendor change can be a plane change ================
+#
+# 48c moved a role sideways on TRANSPORT, but the plane was bound once at
+# construction, so only the model id moved. A `claude_code` role failing over to
+# an HTTP vendor kept dispatching through the Claude Code harness and handed it a
+# DeepSeek model id to run.
+#
+# That is the case the whole design is for — prefer the subscription, fall back
+# when it saturates — and it was the one case never tested: before this block,
+# `test_failover.py` did not contain the word "provider", so every test here
+# moved between two vendors that happened to share a plane.
+
+
+class _NamedPlane:
+    """A stand-in plane that records which role it was asked to run."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.calls: list[Role] = []
+
+    async def run(self, role, spec, assembler, toolbox, **kw):
+        self.calls.append(role)
+        return _Outcome(role, f"{self.name}-model")
+
+
+def _routed(registry, local_provider: str = "claude_code"):
+    """A ProviderRoutedPlane over two distinguishable planes."""
+    from aop.execution import ProviderRoutedPlane
+
+    internal = _NamedPlane("internal")
+    local = _NamedPlane("local")
+    plane = ProviderRoutedPlane(registry, default=internal, local={local_provider: local})
+    return plane, internal, local
+
+
+def test_the_plane_follows_the_vendor(tmp_path):
+    """The carrying test for the slot.
+
+    A role whose active vendor is `claude_code` dispatches to that plane; after
+    `advance()` moves it to an HTTP vendor, the very same object dispatches to
+    the internal worker instead. Nothing re-wires anything — the provider is read
+    per dispatch.
+    """
+    registry = _registry("deepseek-stand-in", role=Role.LOW, provider="openai")
+    # Make the primary a local-plane vendor; the fallback stays HTTP.
+    config = registry._config  # noqa: SLF001 - constructing the exact shipped shape
+    primary = config.roles[Role.LOW]
+    roles = dict(config.roles)
+    roles[Role.LOW] = primary.model_copy(update={"provider": "claude_code"})
+    registry = Registry(config.model_copy(update={"roles": roles}), env={})
+
+    plane, internal, local = _routed(registry)
+
+    assert registry.provider(Role.LOW) == "claude_code"
+    assert plane.plane_for(Role.LOW) is local
+
+    moved = registry.advance(Role.LOW)
+    assert moved is not None
+    assert registry.provider(Role.LOW) == "openai"
+    assert plane.plane_for(Role.LOW) is internal, (
+        "the plane must follow the vendor — this is the 48c gap"
+    )
+
+
+def test_an_http_vendor_never_reaches_the_local_plane(tmp_path):
+    registry = _registry("second", role=Role.LOW, provider="openai")
+    plane, internal, _local = _routed(registry)
+    assert plane.plane_for(Role.LOW) is internal
+    registry.advance(Role.LOW)
+    assert plane.plane_for(Role.LOW) is internal
+
+
+async def test_a_dispatch_goes_to_the_plane_the_vendor_names(tmp_path):
+    """Asserts the consequence — which plane actually ran — not the lookup."""
+    config = load_settings(PROJECT_CONFIG).registry
+    roles = dict(config.roles)
+    roles[Role.LOW] = config.roles[Role.LOW].model_copy(update={"provider": "claude_code"})
+    registry = Registry(config.model_copy(update={"roles": roles}), env={})
+
+    plane, internal, local = _routed(registry)
+    spec = TaskSpec(spec_id="s", task_id="t", goal="g", acceptance=["a"])
+
+    await plane.run(Role.LOW, spec, None, None)
+    assert local.calls == [Role.LOW]
+    assert internal.calls == []
+
+    await plane.run(Role.HIGH, spec, None, None)
+    assert internal.calls == [Role.HIGH], "an HTTP role stays on the worker"
+
+
+def test_the_operator_builds_the_local_plane_when_only_a_fallback_needs_it(tmp_path):
+    """A role whose primary is HTTP and whose fallback is `claude_code` needs
+    that plane built *before* the failover, not after it has already failed."""
+    from aop.operator import Operator
+
+    settings = load_settings(PROJECT_CONFIG, project_root=tmp_path)
+    primary = settings.registry.roles[Role.LOW]
+    settings.registry.roles[Role.LOW] = primary.model_copy(
+        update={
+            "fallback": [
+                primary.model_copy(
+                    update={"provider": "claude_code", "base_url": None, "fallback": []}
+                )
+            ]
+        }
+    )
+
+    try:
+        operator = Operator(settings)
+    except ClaudeCodeUnavailable:
+        # Correct: it refused up front rather than mid-failover.
+        return
+    assert type(operator.plane.plane_for(Role.LOW)).__name__ == "Worker"

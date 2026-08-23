@@ -288,10 +288,14 @@ def test_selecting_claude_code_never_silently_returns_the_worker(tmp_path):
     settings.policy.execution.plane = "claude_code"
 
     try:
-        plane = Operator(settings).plane
+        operator = Operator(settings)
     except ClaudeCodeUnavailable as exc:
+        # Still raised at construction, not at first dispatch. Both causes cost a
+        # real measurement to find: no SDK, and no `claude` on PATH — the latter
+        # a five-minute hang with zero attempts logged.
         assert "SDK" in str(exc) or "PATH" in str(exc)
     else:
+        plane = operator.plane.plane_for(Role.HIGH)
         assert not isinstance(plane, Worker)
         assert type(plane).__name__ == "ClaudeCodePlane"
 
@@ -299,4 +303,4 @@ def test_selecting_claude_code_never_silently_returns_the_worker(tmp_path):
 def test_the_internal_plane_is_the_worker(tmp_path):
     settings = load_settings(PROJECT_CONFIG, project_root=tmp_path)
     operator = Operator(settings)
-    assert operator.plane is operator.worker
+    assert operator.plane.plane_for(Role.HIGH) is operator.worker

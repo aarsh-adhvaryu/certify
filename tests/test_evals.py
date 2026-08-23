@@ -16,8 +16,9 @@ import pytest
 
 from aop.core.config import load_settings
 from aop.core.ids import FrozenClock, SequentialIds
-from aop.core.schemas import Difficulty, Verdict
+from aop.core.schemas import Difficulty, Role, Verdict
 from aop.evals import Comparison, EvalSuite, Harness, RunReport, SuiteError, TaskResult
+from aop.registry.cost import Usage
 from aop.registry.providers import MockProvider, MockReply
 from aop.verify.base import Verifier, VerifierKind, VerifierRegistry
 
@@ -529,3 +530,125 @@ def test_the_restricted_comparison_says_how_narrow_it_is():
     restricted = Comparison(incumbent=inc, candidate=cand).on_common_tasks()
     assert "on 2 shared" in restricted.incumbent.label
     assert "on 2 shared" in restricted.candidate.label
+
+
+# ================ real money vs list price, through the harness ==============
+#
+# `billable_cost_usd` shipped as a field, a property that reads it, and unit
+# tests that set it by hand — and nothing ever set it for real. Every saved run
+# carried null, `RunReport.cost` fell through to list price, and the Slot 48d
+# report claimed Claude Code cost $10.81 against DeepSeek's $0.52 when it had
+# actually spent $0.31 and was the cheaper of the two. The producer was missing
+# while the consumer and its tests were green.
+#
+# So these drive a real Harness. A test that builds TaskResult itself cannot
+# fail the way the original bug failed.
+
+
+class _FlatRateOutcome:
+    """What a subscription plane reports: a list-equivalent price, not a bill."""
+
+    def __init__(self, role: Role, cost: Decimal) -> None:
+        self.role = role
+        self.usage = Usage(tokens_in=10, tokens_out=10)
+        self.cost_usd = cost
+
+    @property
+    def served_model_id(self) -> str:
+        return "flat-rate-model"
+
+    @property
+    def latency_ms(self) -> int:
+        return 1
+
+    @property
+    def exhausted(self) -> bool:
+        return False
+
+
+class _FlatRatePlane:
+    """A plane whose cost does not come from the registry.
+
+    This is the only shape that separates real money from list price: the
+    registry says the role is free, so the ledger records the call
+    non-billable, while the plane still reports what the work would have cost
+    metered.
+    """
+
+    def __init__(self, cost: Decimal = Decimal("2.50")) -> None:
+        self.cost = cost
+
+    async def run(self, role, spec, assembler, toolbox, **kw):
+        return _FlatRateOutcome(role, self.cost)
+
+
+async def test_the_harness_reports_real_money_not_list_price(tmp_path):
+    """The Slot 48d cost bug, pinned end to end."""
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    suite = EvalSuite.load(SHIPPED_SUITE)
+    task = next(t for t in suite.tasks if t.expect_pass)
+
+    report = await Harness(
+        suite, settings, label="flat",
+        clock=FrozenClock(T0, step=timedelta(milliseconds=1)),
+        transport=MockProvider(plausible=True).transport(),
+        gate=_AlwaysPasses(),
+        plane=_FlatRatePlane(Decimal("2.50")),
+    ).run([task])
+
+    result = report.results[0]
+    assert result.cost_usd >= Decimal("2.50"), "the plane's list price must reach the report"
+    assert result.billable_cost_usd is not None, (
+        "a flat-rate attempt must be recorded as costing no real money — this is "
+        "the assertion the original bug would have failed"
+    )
+    assert result.billable_cost_usd < result.cost_usd
+
+    # The two report-level numbers must disagree, and `cost` must be the small one.
+    assert report.cost < report.list_cost
+    assert report.cost == result.billable_cost_usd
+    assert report.list_cost == result.cost_usd
+
+
+async def test_a_metered_run_reports_one_number(tmp_path):
+    """No flat-rate plane means no distinction to draw, and none invented.
+
+    The guard against the opposite mistake: `billable_cost_usd` set on every
+    metered result would make `cost` and `list_cost` diverge for runs where they
+    are genuinely the same figure.
+    """
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    suite = EvalSuite.load(SHIPPED_SUITE)
+    task = next(t for t in suite.tasks if t.expect_pass)
+
+    report = await Harness(
+        suite, settings, label="metered",
+        clock=FrozenClock(T0, step=timedelta(milliseconds=1)),
+        transport=MockProvider(plausible=True).transport(),
+        gate=_AlwaysPasses(),
+    ).run([task])
+
+    assert report.results[0].billable_cost_usd is None
+    assert report.cost == report.list_cost
+
+
+async def test_the_report_names_the_plane_that_actually_ran(tmp_path):
+    """`roles` names models, not planes. Two runs can share every model id and
+    still be measuring different implementation loops — and an injected plane
+    must never be reported under the configured plane's name."""
+    settings = load_settings(TEST_CONFIG, project_root=tmp_path)
+    suite = EvalSuite.load(SHIPPED_SUITE)
+    task = next(t for t in suite.tasks if t.expect_pass)
+
+    common = dict(
+        clock=FrozenClock(T0, step=timedelta(milliseconds=1)),
+        transport=MockProvider(plausible=True).transport(),
+        gate=_AlwaysPasses(),
+    )
+
+    configured = await Harness(suite, settings, **common).run([task])
+    assert configured.plane == settings.policy.execution.plane
+
+    injected = await Harness(suite, settings, plane=_FlatRatePlane(), **common).run([task])
+    assert injected.plane == "_FlatRatePlane"
+    assert injected.plane != settings.policy.execution.plane

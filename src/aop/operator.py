@@ -43,8 +43,14 @@ from aop.core.lifecycle import TaskLifecycle
 from aop.core.scheduler import Scheduler
 from aop.core.schemas import FailureClass, Role, Strict, Task, TaskSpec, TaskStatus
 from aop.core.state import StateStore
-from aop.execution import EscalationLadder, ExecutionPlane, Worker, build_toolbox
-from aop.guards import BudgetGuard, PathJail
+from aop.execution import (
+    EscalationLadder,
+    ExecutionPlane,
+    ProviderRoutedPlane,
+    Worker,
+    build_toolbox,
+)
+from aop.guards import BudgetGuard, DiscoveryScope, PathJail
 from aop.memory.logbook import Logbook
 from aop.registry import Registry
 from aop.registry.adapter import Adapter, AdapterError, Message
@@ -107,6 +113,7 @@ class Operator:
         clock: Clock | None = None,
         ids: IdSource | None = None,
         gate: VerifierRegistry | None = None,
+        plane: ExecutionPlane | None = None,
     ) -> None:
         self.settings = settings
         self.clock = clock or SystemClock()
@@ -119,6 +126,15 @@ class Operator:
         self.jail = PathJail(settings.jail_root)
         self.jail.root.mkdir(parents=True, exist_ok=True)
         self.backend = build_backend(settings.policy, self.jail)
+        # Where a worker may *look*, as opposed to where it may write. A second,
+        # differently shaped guard: an allowlist of roots rather than one root,
+        # and read-only. Empty by default, so it grants nothing until asked.
+        self.discovery = DiscoveryScope(
+            settings.policy.discovery.roots,
+            deny_dirs=settings.policy.discovery.deny_dirs,
+            deny_names=settings.policy.discovery.deny_names,
+            max_results=settings.policy.discovery.max_results,
+        )
 
         self.mock: MockProvider | None = None
         mounts = None if transport is not None else self._mock_mounts()
@@ -136,7 +152,14 @@ class Operator:
         # internal worker whichever plane is selected: the test author and the
         # implementer must not be the same actor, and putting them on different
         # planes entirely is a stronger separation than the frozen file alone.
-        self.plane: ExecutionPlane = self._build_plane()
+        self.plane: ExecutionPlane = plane or self._build_plane()
+        # Injected or selected, the name is recorded rather than inferred. A
+        # report that names the plane from config while something else actually
+        # ran is the same wrong answer `_build_plane` refuses to give.
+        self.plane_name: str = (
+            type(plane).__name__ if plane is not None
+            else settings.policy.execution.plane
+        )
         self.router = RuleRouter(self.registry)
         self.checkpoints = CheckpointLog(settings.policy.effort, self.bus)
 
@@ -180,28 +203,49 @@ class Operator:
         return mounts
 
     def _build_plane(self) -> ExecutionPlane:
-        """Select the execution plane named in policy.
+        """Assemble the plane that dispatches attempts.
 
-        Sequencing, not logic: the choice is a config value and each plane owns
-        its own behaviour. The unimplemented case raises rather than silently
-        falling back, because a run that quietly used the other plane would be
-        measured as the one that was asked for — and this seam exists to make
-        exactly that comparison trustworthy.
+        Sequencing, not logic: each plane owns its own behaviour, and which one
+        a role uses is decided by that role's *provider* — read per dispatch, so
+        it follows a Slot 48c failover instead of going stale the moment one
+        happens. See :class:`ProviderRoutedPlane`.
+
+        Local planes are built **here**, eagerly, even though routing is lazy.
+        Both of `ClaudeCodePlane`'s startup checks — the SDK import and the
+        `claude` binary on PATH — exist because discovering either one mid-run
+        already cost a real measurement. Fail at construction, not ninety minutes
+        into a paid run.
         """
-        plane = self.settings.policy.execution.plane
-        if plane == "internal":
-            return self.worker
-        if plane == "claude_code":
+        declared = self.settings.policy.execution.plane
+        if declared not in ("internal", "claude_code"):
+            raise NotImplementedError(f"no such execution plane: {declared!r}")
+
+        local: dict[str, ExecutionPlane] = {}
+        if declared == "claude_code" or self._uses_provider("claude_code"):
             from aop.execution.claude_code import ClaudeCodePlane
 
-            return ClaudeCodePlane(
+            local["claude_code"] = ClaudeCodePlane(
                 self.registry,
                 self.jail,
                 max_turns=self.settings.policy.execution.claude_max_turns,
                 bus=self.bus,
                 clock=self.clock,
             )
-        raise NotImplementedError(f"no such execution plane: {plane!r}")
+        return ProviderRoutedPlane(self.registry, default=self.worker, local=local)
+
+    def _uses_provider(self, provider: str) -> bool:
+        """Whether any role could reach this provider — fallbacks included.
+
+        The chain matters as much as the primary: a role whose primary is an
+        HTTP vendor and whose fallback is `claude_code` needs that plane built
+        before the failover happens, not after it has already failed.
+        """
+        for entry in self.settings.registry.roles.values():
+            if entry.provider == provider:
+                return True
+            if any(alt.provider == provider for alt in entry.fallback):
+                return True
+        return False
 
     def _default_gate(self) -> VerifierRegistry:
         gate = VerifierRegistry()
@@ -411,7 +455,12 @@ class Operator:
 
         # 2 — the plan is checked deterministically. The conductor's own account
         # of why its plan is faithful is recorded and carries no weight.
-        rationale = record_rationale(task_id, task.directive, spec, stated=emission.raw[:2000])
+        rationale = record_rationale(
+            task_id, task.directive, spec, stated=emission.raw[:2000],
+            require_falsifiable=(
+                self.settings.policy.conductor.require_falsifiable_directive
+            ),
+        )
         self.bus.emit(
             LogLine, task_id=task_id,
             level="info" if rationale.check.ok else "error",
@@ -470,7 +519,7 @@ class Operator:
         )
         result = await ladder.run(
             task_id, spec, working,
-            build_toolbox(self.jail, self.backend),
+            build_toolbox(self.jail, self.backend, discovery=self.discovery),
             VerifyContext(
                 task_id=task_id, spec=spec, workspace=self.jail.root,
                 target=authored.path if authored.written else None,

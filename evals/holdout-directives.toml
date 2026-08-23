@@ -1,0 +1,231 @@
+# Held-out directives for Slot 48e.
+#
+# WRITTEN BEFORE THE RULE, ON PURPOSE. The candidate lever recorded in
+# NEXT-PLAN.md — "does the directive name a referent that exists in the staged
+# fixture?" — separated the shipped eleven-task suite 11/11. That is not
+# evidence: the rule was derived from those same eleven tasks, two of which are
+# the refusal cases. A rule fitted to its own test set will always look perfect.
+#
+# So these are labelled by one question only, asked without reference to any
+# rule: **could a competent engineer, given the workspace and nothing else,
+# write a pass/fail test from this directive alone?**
+#
+#   expect = "accept"  -> yes. The gate must let it through.
+#   expect = "refuse"  -> no. There is no fact of the matter about when it is done.
+#
+# Deliberately included, because they are where a naive rule breaks:
+#
+#   * accepts that name NO existing symbol, path or quoted literal
+#     (`stopword-fallback`, `cli-entry-point`) — a referent test refuses these
+#   * refuses that DO name a real symbol (`refactor-maintainable`,
+#     `speed-up-search`) — a referent test accepts these
+#   * an accept carrying an evaluative word that is properly grounded
+#     (`thorough-boundary-tests`) — a keyword test refuses this
+#
+# Realistic against `evals/fixtures/bm25` and `evals/fixtures/gate`.
+# If you tune the gate, re-score against this file and record the number.
+# Do not edit a label to make a rule look better; add a case instead.
+
+version = 1
+name = "holdout-directives"
+
+
+# ============================== should be accepted ==========================
+
+[[directive]]
+id = "store-missing-error"
+expect = "accept"
+text = """BM25Retriever.__init__ opens the store file with no error handling, so a \
+missing chunk_store.json surfaces as a bare FileNotFoundError from deep inside \
+the constructor. Raise a RetrieverError naming the path it tried instead."""
+
+[[directive]]
+id = "min-score-argument"
+expect = "accept"
+text = """Add a min_score keyword argument to BM25Retriever.search that drops results \
+scoring below it. Default it to 0.0 so existing callers see no change."""
+
+[[directive]]
+id = "punctuation-order"
+expect = "accept"
+text = """The tokenizer lowercases before stripping punctuation, so 'U.S.A' becomes \
+three single-character tokens and is then discarded. Swap the order so it \
+tokenizes to 'usa'."""
+
+[[directive]]
+id = "unknown-domain-raises"
+expect = "accept"
+text = """check_sufficiency returns None for a domain that is not in REQUIRED_SLOTS, \
+which callers then treat as sufficient. Make it raise a ValueError naming the \
+unknown domain."""
+
+[[directive]]
+id = "extract-default-path"
+expect = "accept"
+text = """Extract the hardcoded '../index/chunk_store.json' default into a module-level \
+constant DEFAULT_STORE_PATH and reference it from the constructor signature."""
+
+[[directive]]
+id = "topk-regression-test"
+expect = "accept"
+text = """Write a regression test asserting that search() never returns more than top_k \
+results, including the case where every indexed document scores above zero."""
+
+[[directive]]
+id = "sorted-missing-slots"
+expect = "accept"
+text = """get_missing_slots returns slots in dictionary order, so the clarifying question \
+it feeds changes wording between runs. Sort the slots alphabetically before \
+returning them."""
+
+[[directive]]
+id = "thorough-boundary-tests"
+expect = "accept"
+# Carries "thorough" — evaluative — but grounded by an enumerable target.
+# A gate that refuses on the adjective alone breaks this one.
+text = """Write a thorough test suite for the tokenizer covering every branch: empty \
+input, punctuation-only input, mixed case, and tokens of length one."""
+
+[[directive]]
+id = "stopword-fallback"
+expect = "accept"
+# Names no existing symbol, no path, no quoted literal. Still perfectly
+# checkable: current behaviour and desired behaviour are both stated.
+text = """The retriever returns an empty list when a query contains nothing but \
+stopwords. It should fall back to returning the shortest documents in the index \
+rather than nothing at all."""
+
+[[directive]]
+id = "cli-entry-point"
+expect = "accept"
+# A deliverable rather than a defect, and again no existing referent named.
+text = """Add a command line entry point that takes a query as its single argument and \
+prints the top 5 results as JSON to stdout."""
+
+
+# ============================== should be refused ===========================
+
+[[directive]]
+id = "improve-search-quality"
+expect = "refuse"
+text = "Improve search quality."
+
+[[directive]]
+id = "clean-up-codebase"
+expect = "refuse"
+text = "Clean up the codebase."
+
+[[directive]]
+id = "optimize-tokenizer"
+expect = "refuse"
+text = "Optimize the tokenizer."
+
+[[directive]]
+id = "more-robust-gate"
+expect = "refuse"
+text = "Make the sufficiency gate more robust."
+
+[[directive]]
+id = "refactor-maintainable"
+expect = "refuse"
+# Names a real class. A referent test accepts this; there is still no fact of
+# the matter about when "maintainable" has been reached.
+text = "Refactor BM25Retriever to be more maintainable."
+
+[[directive]]
+id = "speed-up-search"
+expect = "refuse"
+# Same trap, with a real method name and no threshold to hit.
+text = "Speed up search()."
+
+[[directive]]
+id = "proper-error-handling"
+expect = "refuse"
+text = "Add proper error handling."
+
+[[directive]]
+id = "professional-coverage"
+expect = "refuse"
+# "professional standard" is a judgement, not a threshold.
+text = "Bring the test coverage up to a professional standard."
+
+[[directive]]
+id = "retrain-on-production-logs"
+expect = "refuse"
+# Unavailable premise rather than unfalsifiable phrasing — the second failure
+# mode. Recorded here to show which mode a given check actually catches.
+text = """Retrain the ranking model on last quarter's production search logs and deploy \
+the improved weights."""
+
+[[directive]]
+id = "modernize-the-module"
+expect = "refuse"
+text = "Modernize bm25_retriever.py to follow current best practices."
+
+
+# ====================== NOT held out — found during 48e =====================
+#
+# These were written *while implementing* the gate, after probing it by hand
+# with shapes the twenty above did not cover: a concrete deliverable carrying an
+# evaluative *motivation*. Six of seven were refused by the first working
+# version, which would have been the worse failure — "delete the unused imports
+# to clean up the module" is entirely checkable.
+#
+# They are recorded separately and labelled `heldout = false` because the rule
+# was then changed to satisfy them. They are regression cases, not evidence.
+# The twenty above remain the only honestly held-out score.
+
+[[directive]]
+id = "add-caching-for-speed"
+expect = "accept"
+heldout = false
+text = "Add caching to speed up repeated queries."
+
+[[directive]]
+id = "add-lru-cache"
+expect = "accept"
+heldout = false
+text = """Add an LRU cache to BM25Retriever.search to speed up repeated queries."""
+
+[[directive]]
+id = "heap-ranking"
+expect = "accept"
+heldout = false
+text = "Replace the linear scan with a heap so ranking is faster."
+
+[[directive]]
+id = "split-for-maintainability"
+expect = "accept"
+heldout = false
+text = """Split bm25_retriever.py into a tokenizer module and a retriever module for \
+maintainability."""
+
+[[directive]]
+id = "delete-unused-imports"
+expect = "accept"
+heldout = false
+text = "Delete the unused imports to clean up the module."
+
+[[directive]]
+id = "numpy-vectorisation"
+expect = "accept"
+heldout = false
+text = "Switch to numpy vectorisation for a faster scoring loop."
+
+[[directive]]
+id = "add-proper-error-handling"
+expect = "refuse"
+heldout = false
+# The trap on the other side: the deliverable verb is there, but the evaluative
+# word is describing the deliverable rather than the reason for it. "Proper"
+# error handling has no more fact of the matter than "better" retrieval.
+text = "Add proper error handling."
+
+[[directive]]
+id = "rewrite-for-readability"
+expect = "refuse"
+heldout = false
+# Deliberately the same shape as `refactor-maintainable`, and labelled the same
+# way. "Rewrite" and "refactor" both name wanting the code to be different
+# without saying how, so the verb list excludes both.
+text = "Rewrite the tokenizer regex to improve readability."

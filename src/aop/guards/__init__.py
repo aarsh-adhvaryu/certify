@@ -11,12 +11,15 @@ cached prefix intact (see ``registry/toolcalls.py``), and it never escalates.
 from aop.guards.budget import BudgetExceeded, BudgetGuard
 from aop.guards.commands import CommandGuard
 from aop.guards.denial import GuardDenied
+from aop.guards.discovery import DiscoveryScope, Found
 from aop.guards.pathjail import PathJail
 
 __all__ = [
     "BudgetExceeded",
     "BudgetGuard",
     "CommandGuard",
+    "DiscoveryScope",
+    "Found",
     "GuardDenied",
     "PathJail",
 ]

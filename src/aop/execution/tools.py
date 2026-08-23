@@ -23,6 +23,7 @@ from pathlib import Path
 from aop.backends.base import RunBackend
 from aop.core.schemas import Strict
 from aop.guards.denial import GuardDenied
+from aop.guards.discovery import DiscoveryScope
 from aop.guards.pathjail import PathJail
 from aop.registry.toolcalls import ToolBox
 
@@ -87,6 +88,36 @@ class FileTools:
         return "\n".join(f"{kind} {name}" for kind, name in entries) or "(empty)"
 
 
+class DiscoveryTools:
+    """Finding things outside the jail — paths only, never contents.
+
+    Deliberately not a shell command. `guards/commands.py` allowlists *which
+    program* may run, not *which paths it may touch*, so putting `where` or
+    `findstr` on that list would be filesystem reach behind a guard that cannot
+    see filesystem arguments. This is the same capability with an actual guard
+    behind it (`DiscoveryScope`, Slot 51).
+    """
+
+    def __init__(self, scope: DiscoveryScope) -> None:
+        self._scope = scope
+
+    def locate(self, pattern: str, root: str | None = None, limit: int | None = None) -> str:
+        result = self._scope.locate(pattern, root=root, limit=limit)
+        found = result.hits
+        if not found:
+            if result.truncated:
+                return f"(no matches — search stopped early: {result.truncated})"
+            return "(no matches)"
+        lines = []
+        for hit in found:
+            kind = "dir " if hit.is_dir else "file"
+            size = "" if hit.is_dir else f"  {hit.size_bytes:>12,} B"
+            lines.append(f"{kind} {hit.modified:%Y-%m-%d}{size}  {hit.path}")
+        note = f" (truncated: {result.truncated})" if result.truncated else ""
+        header = f"{len(found)} match(es){note}"
+        return "\n".join([header, *lines])
+
+
 class ShellTools:
     """Command execution, allowlist-enforced, through the configured backend."""
 
@@ -112,6 +143,7 @@ def build_toolbox(
     backend: RunBackend | None = None,
     *,
     allow_write: bool = True,
+    discovery: DiscoveryScope | None = None,
 ) -> ToolBox:
     """Assemble the worker's tools with guards already attached.
 
@@ -168,6 +200,29 @@ def build_toolbox(
                     "replace": {"type": "string"},
                 },
                 "required": ["path", "find", "replace"],
+            },
+        )
+
+    # Registered only when roots are configured. An always-present tool that
+    # always refuses trains the model to stop asking, and burns a round trip
+    # every time it learns that again.
+    if discovery is not None and discovery.roots:
+        box.register(
+            "locate",
+            DiscoveryTools(discovery).locate,
+            description=(
+                "Find files and directories by glob, outside the workspace. "
+                "Returns paths, sizes and dates only — never file contents. "
+                "Use read_file for contents, which stays inside the workspace."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "root": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["pattern"],
             },
         )
 

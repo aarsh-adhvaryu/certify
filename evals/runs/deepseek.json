@@ -164,5 +164,6 @@
     "high": "deepseek-v4-pro",
     "max": "deepseek-v4-pro"
   },
-  "failover": false
+  "failover": false,
+  "plane": "internal"
 }

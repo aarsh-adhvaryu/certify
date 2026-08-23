@@ -5,9 +5,47 @@ This covers 41–73, re-scoped around the Jarvis goal.*
 
 ## Context
 
-*Status as of 22 Aug 2026: Blocks A–J2 complete, **757 tests**, live on DeepSeek
-+ Claude Code, ~$1.20 real spend. Next block is **K — Voice**, but see the
-`underspecified` finding in Block J2 first — it outranks it.*
+*Status as of 22 Aug 2026: Blocks A–J2 complete plus the **J2.5 audit and
+instrument repair**, **829 tests**, live on DeepSeek + Claude Code, ~$1.20 real
+spend.*
+
+**Direction, settled 22 Aug — a bounded Jarvis on Claude Code.** Not free-roaming,
+not a Claude Code plugin, no MCP/skills/agents. The orchestrator stays the outer
+process; Claude Code is its preferred execution plane and DeepSeek catches it
+when the subscription saturates.
+
+**The split that makes it affordable — and it is now the shipped default:**
+
+| role | runs on | why |
+|---|---|---|
+| conductor | **DeepSeek** | it plans and it talks, and it is ~60% of a task's bill (3,605 output tokens planning vs 338 doing). Cheap, structured JSON |
+| low / high / max | **Claude Code** → DeepSeek | it is excellent at coding and expensive as a conversationalist, so it gets the coding and nothing else |
+
+*"Claude as Jarvis will just burn unnecessary tokens — it works great in coding
+but using it conversationally is a mistake."* That is the reason the conductor
+must never move onto the agent harness, and the reason a future conversational
+surface goes on the cheapest capable model, **not** on Claude Code.
+
+**Why not a plugin.** Claude Code plugins package hooks + MCP + skills and load
+by local path, so packaging is solved — but the control direction inverts.
+Claude Code becomes the caller, the conductor and ladder become redundant, and
+**the DeepSeek/Qwen failover dies**, because that only exists while our process
+is on the outside. An MCP tool is also model-discretionary: a gate the model
+chooses whether to invoke is not a gate, which is the `acceptance: []` lesson one
+level up. Only `hooks/` fire deterministically (*"if any hook returns `deny`, the
+operation is blocked regardless of other hooks"*), so a plugin, if ever built, is
+hooks — never MCP.
+
+**Order:** ~~48e~~ ✅ → ~~49 cross-plane failover~~ ✅ → ~~51 shell discovery~~ ✅ →
+**Block L, system hygiene, built to done**. Blocks K (voice), M (proactivity)
+and N (perception) stay written down and unbuilt until L is real.
+
+That is a deliberate cut, and the reason is in the audit: the post-Jarvis roadmap
+is **four separate products sharing a daemon**, 22 slots at one slot per session,
+and only Block L reuses the machinery already built and paid for — the verifier
+gate, the `RunBackend`, and the command allowlist. It is also the only one that
+makes the daemon useful without a microphone or a screen reader. Starting four
+blocks is how a finished core stays unshipped.
 
 Slots 01–40 were complete at: **549 tests, zero spend, whole pipeline on mocks** (directive → checkpoint → spec → router → test authorship → ladder →
 verdict → logbook → journal).
@@ -390,9 +428,14 @@ Code won one and lost none, and finished the suite faster (99.7 min vs 110.8).
 | | DeepSeek | Claude Code |
 |---|---|---|
 | correct (10 shared) | 8/10 | **9/10** |
-| real money | **$0.5179** | **$0.3096** |
-| list-equivalent | $0.5179 | $12.67 |
-| wall clock | 110.8 min | 99.7 min |
+| real money | $0.4789 | **$0.2650** |
+| list-equivalent | $0.4789 | $10.81 |
+| wall clock | 103.6 min | 99.5 min |
+
+> **Corrected 22 Aug by the audit (Block J2.5).** These are the ten *shared*
+> tasks, printed by `aop compare`, not hand-computed. The earlier `$0.3096 /
+> $12.67` figures came from a manual ledger query that summed the whole database
+> including abandoned re-runs. See F-01.
 
 **The decisive task is `topk-shortfall`:** DeepSeek burned all four attempts,
 exhausted the ladder and was handed to a human; Claude Code solved it in two.
@@ -406,10 +449,15 @@ is the explicitly narrowed answer above.
 **Cost is the opposite of what the first report claimed.** It said $10.81 vs
 $0.52 — a 20x penalty — because `RunReport.cost` summed a flat-rate plane's
 list-equivalent price as if it were money. Only the DeepSeek conductor bills on
-this configuration, so the real figures are **$0.31 vs $0.52: Claude Code is
-cheaper**, on a Pro subscription with no API key. Fixed via
-`TaskResult.billable_cost_usd`; `cost` is now real money and `list_cost` is what
-the work would cost metered.
+this configuration, so **Claude Code is the cheaper of the two**, on a Pro
+subscription with no API key.
+
+> ⚠️ **This paragraph claimed the fix and the fix was not there.** `cost` kept
+> reporting list price on every run until Slot 48f, because
+> `TaskResult.billable_cost_usd` was declared and consumed but **never set** by
+> `Harness._run_one`. The `$0.31` was typed in from a manual ledger query, not
+> produced by the instrument. Corrected figures are in the table above; the
+> mechanism is F-01 in Block J2.5.
 
 **The finding that outranks the comparison: `underspecified` failed on BOTH
 planes.** *"Make the retriever better."* was expected to be handed back; both
@@ -633,6 +681,128 @@ Only a DeepSeek key exists today. [PRICING.md](PRICING.md) has verified prices
 and paste-ready blocks for Kimi and Qwen; GLM was never researched. The mechanism
 is built — adding a rung is now a **config edit**, which is the whole point.
 
+## Block J2.5 — the audit, and Slot 48f (instrument repair)
+
+*22 Aug 2026. A full audit against these notes, before starting Block K. The
+execution core held; the **measurement layer** did not, and three findings
+recorded above as settled were not supported by the code meant to produce them.
+Slot 48f fixed the instrument. **771 tests green.***
+
+### What the audit checked and found sound
+
+`pytest` reports 771 passed / 1 skipped, verified rather than assumed. The 48
+completed slots exist as described, the module map matches the tree, and the
+guard architecture is real. Every defect below sits in the layer that *reports*
+whether the system works — which is exactly where the two "wired to nothing"
+warnings above predicted it would.
+
+### F-01 — the cost verdict was never computed by anything ✅ fixed
+
+`TaskResult.billable_cost_usd` shipped as a field with a full docstring, a
+`RunReport.cost` property that reads it, and unit tests exercising it — while
+`Harness._run_one` **never set it**. Every saved run carried `null`, `cost` fell
+through to `list_cost`, and the artifact reported Claude Code at **$10.81**
+against DeepSeek's $0.52: a 20x penalty, the exact error this file claims was
+fixed. The tests were green because they constructed `TaskResult` by hand — they
+*were* the missing producer.
+
+The `$0.3096` written above was a manual ledger query typed into the notes. It is
+also slightly wrong: it summed the whole database, including abandoned re-runs.
+Joining the ledger to the eleven reported tasks gives **$0.2650**.
+
+Fixed in `_run_one` by reading `store.task_spend(id)` (billable only). The saved
+`claude_code.json` was backfilled from the ledger — a deterministic join on
+directive plus the exact rollup the report recorded, 11/11 matched — rather than
+re-run, since the ledger is the durable authority and a re-run costs $0.31 and
+100 minutes to learn nothing new. Pre-fix originals are in git at `94ecc61`.
+
+**The verdict this changes:**
+
+```
+before   KEEP INCUMBENT — candidate matched on pass-rate but costs 22.58x
+after    PROMOTE        — same or better pass-rate (90% vs 80%) at 0.55x the cost
+```
+
+### F-02 — the escalation ladder has never escalated ✅ recorded, deferred by decision
+
+`high` and `max` in `config/registry.toml` are **byte-identical** — same
+`model_id` (`deepseek-v4-pro`), same temperature, same capabilities. All three
+`config-claude` rungs are `claude-sonnet-5`, which that file's comments state
+honestly. The consequence was recorded nowhere: **no run has ever escalated to a
+stronger model.** Every "full ladder climb" above — `topk-shortfall` included —
+was N attempts at one model with the failure text appended.
+
+The Slot 48d comparison survives this; Sonnet beating `deepseek-v4-pro` is still
+a real result. Any claim about *the ladder* does not.
+
+**Decision: tiering is deferred.** The ladder is a retry counter until a
+genuinely stronger `max` exists. It stays built and tested; it is not reasoned
+from. Revisit when a second vendor arrives — which is also when `48c`'s failover
+chain stops being dormant.
+
+### F-03 — the router is a constant function
+
+The conductor emitted `difficulty_hint = "medium"` for **13 specs out of 13**.
+Never `simple`, never `hard`. Those drive the router's two largest weights
+(`+0.45` / `−0.25`), so neither ever fires and every score starts and mostly
+stays at the `0.45` base — inside the `high` band.
+
+| Tier | Attempts | Share |
+|---|---|---|
+| `high` | 16 | 76% — the default, reached by inertia rather than scoring |
+| `max` | 4 | 19% — and identical to `high` anyway (F-02) |
+| `low` | **1** | **5% — effectively dead** |
+
+Slot 40's logic is fine; its input is degenerate, so routing has had no
+measurable effect on any run. `tier_stats` was built to answer "is `low` earning
+its place" — the answer is no, because it is never asked. The fix is at the
+conductor or nowhere. **This also settles Slot 73 on evidence:** a learned router
+trained on these labels would be learning from a constant.
+
+### F-04 — the scope-drift check cannot fire, on two counts
+
+`check_plan` can refuse a plan that "touches files outside the declared scope."
+It never will. `allowed_paths` is never passed by any caller, and the check
+compares against `spec.artifacts`, which is `[]` in **all 13 emitted specs**. The
+same emptiness covers `inputs` (`{}` in all 13) and `constraints` (`[]` in all
+13): three fields of the conductor↔worker contract are declared, versioned,
+validated — and never populated by the conductor that owns them.
+
+A guard that cannot fire is worse than an absent one, because the architecture
+says it is covered. Not fixed in 48f; it belongs with 48e, which is also about
+what the conductor emits.
+
+### F-06 — a dollar ceiling does not bound a flat-rate plane
+
+`per_task_usd = "0.10"`, and on the Claude Code run `impossible-offline` ran
+**28 minutes and four attempts** for $3.22 of list-equivalent work. The guard
+reads billable spend and flat-rate attempts record `billable = 0`, so nothing
+intervened. Correct for money, as the 48c note says — but it leaves *time*
+unguarded. If a guard's unit can go to zero, it needs a second unit.
+
+### Slot 48f — what was built
+
+| | |
+|---|---|
+| `Harness._run_one` | reads `store.task_spend(id)` and sets `billable_cost_usd` when it differs from the rollup |
+| `Operator(plane=…)` | plane injection, matching the existing `transport` / `gate` / `clock` seams |
+| `RunReport.plane` | records the plane that **actually ran** — an injected plane under its own type name, never the configured one's |
+| `aop compare a.json b.json` | `Comparison` reachable from a shell; prints the narrowed answer only when the strict verdict refused |
+| `_banner` | calls `Registry.missing_credentials()` — names missing keys up front instead of one failed dispatch at a time. Also prints the plane |
+| `tests/test_cli.py` | new; the CLI had no tests at all |
+
+**The carrying test is `test_the_harness_reports_real_money_not_list_price`.** It
+injects a flat-rate plane into a real `Harness` and asserts `cost < list_cost`.
+Verified to **fail without the two-line fix** — a test that builds `TaskResult`
+itself cannot catch a missing producer, which is precisely how the original bug
+stayed green.
+
+Housekeeping: removed `probe.db-shm` / `probe.db-wal` (orphaned, no database) and
+`claude_code.2026-08-22T1751.json` (byte-identical rotation copy; git is the
+provenance).
+
+---
+
 ## Block J3 — the conductor's gate (Slot 48e) — DO THIS BEFORE BLOCK K
 
 *Promoted 22 Aug 2026 by the 48d result, which found it by accident.*
@@ -652,20 +822,272 @@ level up: criteria that exist but assert nothing.
 
 | # | Slot | Done when |
 |---|---|---|
-| 48e | Refuse under-specified directives at the plan checkpoint | `underspecified` is handed back rather than completed, and a directive with genuine content is unaffected |
+| 48e | ✅ Refuse under-specified directives at the plan checkpoint | `underspecified` is handed back rather than completed, and a directive with genuine content is unaffected |
+
+### Slot 48e, built — the falsifiability check
+
+`conductor/rationale.falsifiability()`, refused through `check_plan`, wired at
+`operator.py` and switchable via `conductor.require_falsifiable_directive`.
+**781 tests green.** Measured on the real pipeline, not just in tests:
+
+| directive | attempts | outcome |
+|---|---|---|
+| *"Make the retriever better."* | **0** | handed back at the plan checkpoint |
+| *"Refactor BM25Retriever to be more maintainable."* | **0** | handed back — naming a real class does not rescue it |
+| *"Delete the unused imports to clean up the module."* | 4 | ran, as it should |
+
+`aop eval --tag refusal` now scores **2/2 in 0.3 seconds at zero cost.** Those two
+tasks previously cost **$0.194 and ~41 minutes** on DeepSeek (**$6.99 list and
+~52 minutes** on Claude Code), and `underspecified` was scored wrong at the end
+of it.
+
+**The rule: an evaluative directive must say what "done" looks like.** The
+trigger is an evaluative term (`better`, `improve`, `robust`, `maintainable`,
+`clean up`, …) with nothing anywhere in the directive to check it against —
+no quantity, no quoted example, no enumeration, no stated outcome, and no
+concrete deliverable stated ahead of the purpose clause. A directive with no
+evaluative word is never touched: it is describing a defect or naming a
+deliverable, and both are checkable however tersely they are written.
+
+#### What the held-out set was for
+
+The candidate lever this block originally recorded — *does the directive name a
+referent present in the staged fixture?* — scored **11/11 on the shipped suite it
+was derived from and 12/20 on held-out directives.** Three false refusals and
+five false accepts. It was overfit, exactly as the ⚠️ above warned, and writing
+the twenty directives **before** designing anything is the only reason that was
+visible rather than shipped.
+
+| rule | shipped suite | held-out |
+|---|---|---|
+| referent test (the original candidate) | 11/11 | **12/20** |
+| falsifiability (shipped) | 11/11 | **20/20** |
+
+`evals/holdout-directives.toml` holds all of it, and
+`test_the_gate_scores_the_held_out_directives` asserts the count so the set
+cannot quietly shrink. **Re-score against it whenever the rule is touched.**
+
+**Two honest caveats, both recorded in the file itself:**
+
+- **Eight more cases were added during implementation and are marked
+  `heldout = false`.** Probing by hand found a shape the twenty missed — a
+  concrete deliverable carrying an evaluative *motivation* — and the first
+  working gate refused six of eight, including *"delete the unused imports to
+  clean up the module."* That is the over-refusal failure, the worse of the two.
+  The rule was changed to fix it, so those cases are regression tests, not
+  evidence. The twenty remain the only honest score.
+- **Two mechanical fixes were made against the held-out set** (a digit inside
+  `BM25Retriever` reading as a threshold). Bug fixes rather than new signals, but
+  it is still tuning against the test set and is written down as such.
+
+#### What it does not catch
+
+**The second failure mode is still open.** `impossible-offline` is now refused —
+but on the word *"Improve"*, not on the fact that a live server and production
+logs do not exist. Reworded as *"Fine-tune the embedding model on the production
+query logs so recall@10 rises 5%"* it would be accepted and burn a full ladder.
+Detecting an **unavailable premise** needs criteria checked against the staged
+filesystem, and that needs the conductor to populate `spec.inputs` — which
+**F-04** says it never does. That is the natural next slot in this area, and it
+closes F-04 at the same time.
+
+**This changes the measuring setup.** A future run of the shipped suite is no
+longer directly comparable to `deepseek.json` or `claude_code.json` on the two
+refusal tasks: they now cost nothing and refuse in milliseconds. Expect DeepSeek
+to move 9/11 → 10/11.
 
 **The hard part is not detecting vagueness, it is not over-refusing.** A gate
 that rejects real work is worse than one that accepts vague work, because the
 failure is silent and the user just stops trusting it. The existing
 `check_plan` (`conductor/rationale.py`) is the right home — deterministic,
 already able to refuse a plan, already carrying no weight from the model's own
-prose. Likely shape: acceptance criteria must name observable behaviour, not
-restate the goal. Test it against the whole shipped suite, since nine of those
-eleven tasks **must** still pass.
+prose, and already wired into the pipeline at `operator.py` (it refuses on
+`not rationale.trustworthy`).
+
+### The diagnosis above is wrong — corrected by the 22 Aug audit
+
+Two claims in this block do not survive contact with what the conductor actually
+emitted. Read this before building.
+
+**The criteria are not vague.** For *"Make the retriever better."* the conductor
+emitted seven criteria, and they are specific and observable:
+
+```
+- strictly higher recall@10 than the current baseline retriever on the
+  provided relevance-labeled evaluation set
+- strictly higher mean reciprocal rank on the same evaluation set
+- results within 250 ms for at least 95% of queries
+- empty / whitespace-only / stop-words-only queries return an empty
+  result set and do not throw
+- every result is a JSON object with id, score, content
+...
+```
+
+The defect is sharper than vagueness: they reference **a fixture that does not
+exist.** There is no "provided relevance-labeled evaluation set" and no "current
+baseline retriever" in the workspace. The conductor invented a premise,
+authorship wrote tests against the invention, and the gate certified the result.
+
+**And the proposed rule would break the suite.** "Criteria must not restate the
+goal" assumes the goal is a restatement — but **`goal == directive` verbatim in 9
+of 13 emitted specs**, including every task that must keep passing. That rule
+refuses most of the working suite.
+
+**These are two failure modes, not one, and they need two checks:**
+
+| | Shape | Detectable by |
+|---|---|---|
+| **Unfalsifiable directive** | an evaluative adjective on a component — *"make X better"* — with no stated current behaviour and no target | the directive alone |
+| **Unavailable premise** | criteria depending on artifacts not present in the jail — a live server, production logs, "the provided evaluation set" | the criteria **against the staged filesystem** |
+
+`underspecified` is the first; `impossible-offline` is the second. Lumping them
+together is what produced the wrong fix.
+
+**A probed lever for the first, zero-token and deterministic:** does the directive
+name a referent that exists — a path, a symbol in the staged fixture, or a quoted
+literal? Across the shipped suite that separates **11 of 11**, refusing exactly
+the two refusal tasks and accepting all nine that must pass. `short-token-loss`
+is the one that nearly breaks it: it names no symbol, and is saved only by the
+quoted literals `'Form 5'` and `'80C'`.
+
+⚠️ **That rule was fitted to the same eleven tasks it was scored on** — eleven
+samples, two of them the refusal cases. It is a promising lever, not a validated
+one. **Write held-out directives before tuning it**, or 48e will encode this
+suite rather than the principle. Half a dozen each of genuinely-vague and
+genuinely-specific directives, written without looking at the rule, is enough.
+
+**Related, and probably the same slot: F-04.** `spec.artifacts`, `spec.inputs`
+and `spec.constraints` are empty in all 13 emitted specs, which is why the
+scope-drift check can never fire — and why the "unavailable premise" check has
+nothing structured to test against. A conductor that populated `inputs` would
+make the second failure mode mechanically obvious rather than a text problem.
 
 Worth noting the suite already contains the regression test: `underspecified`
 and `impossible-offline` exist precisely because *"a suite of only achievable
 work cannot detect a model that agrees to anything."* It detected exactly that.
+
+## Block J4 — the Claude Code integration (Slots 49–51)
+
+### Slot 49, built — the plane follows the vendor
+
+`execution/plane.ProviderRoutedPlane`. **785 tests green.**
+
+48c moved a role sideways on `TRANSPORT` but bound the plane **once, at
+construction**, so only the model id moved. A `claude_code` role failing over to
+an HTTP vendor kept dispatching through the Claude Code harness and handed it a
+DeepSeek model id. This block's own notes named the shape correctly — *"falling
+from claude_code[low] to Kimi is not a model swap, it is a plane swap"* — and
+then swapped only the vendor. `tests/test_failover.py` did not contain the word
+"provider": every failover test moved between two vendors sharing a plane, so the
+one case the design exists for was never exercised.
+
+**The provider is authoritative, read per dispatch.** `Registry.provider()`
+resolves through the active-vendor pointer, so the plane follows the vendor by
+construction rather than by anything remembering to update it. Measured on the
+real config through a real `Operator`:
+
+```
+healthy      low/high/max   claude_code   claude-sonnet-5   plane=ClaudeCodePlane
+saturated    low/high/max   openai        deepseek-v4-pro   plane=Worker
+```
+
+Three decisions worth keeping:
+
+- **The ladder did not change at all.** `ProviderRoutedPlane` satisfies
+  `ExecutionPlane` and delegates, so the Slot 48a seam absorbed this without the
+  ladder, gate, logbook or failure taxonomy learning that planes can differ.
+  That is what the protocol was for.
+- **Local planes are built eagerly, routed lazily.** Both of `ClaudeCodePlane`'s
+  startup checks — the SDK import and `claude` on PATH — exist because finding
+  either mid-run already cost a real measurement. `_uses_provider()` scans
+  fallbacks too: a role whose *fallback* is `claude_code` needs that plane before
+  the failover, not after it has failed.
+- **An unavailable plane still raises, never silently a Worker.** The invariant
+  moved from construction to dispatch and did not weaken.
+
+### Slot 50, built — the chain is configured, and the incumbent is preserved
+
+`config/` is now the daily driver: **DeepSeek conductor + Claude Code execution,
+each execution tier falling back to DeepSeek.** `aop status` reports
+`SPENDING on: conductor` — the whole point.
+
+| directory | what it is |
+|---|---|
+| `config/` | the daily driver. Claude Code preferred, DeepSeek underneath |
+| `config-deepseek/` | **the preserved incumbent.** Pure DeepSeek — the side `evals/runs/deepseek.json` was measured on. Do not edit |
+| `config-claude/` | the preserved 48d candidate, unchanged, no fallback |
+
+Splitting the incumbent out matters: promoting the Claude split into `config/`
+would otherwise have made the saved baseline non-reproducible, which is the one
+thing the harness exists to prevent.
+
+### Slot 51, built — the discovery scope
+
+`guards/discovery.py` — `DiscoveryScope`, and a `locate` tool on the worker's
+surface. **829 tests green**, 44 of them in `tests/test_discovery.py`.
+
+*"A Jarvis, but instead of roaming freely it uses shell to locate."* It can now
+locate, and nothing about the jail moved.
+
+**It is a tool, not a shell command, and that is the finding.**
+`guards/commands.py` allowlists *which program* may run, not *which paths it may
+touch*. Adding `where` or `findstr` to that list would put filesystem reach
+behind a guard that cannot see filesystem arguments — capability with no
+containment. A path-aware tool is the same capability, actually guarded.
+
+**The shape, which is Block L's Slot 54 in miniature:**
+
+| | |
+|---|---|
+| allowlist of roots | deny-by-default; empty means nothing outside the jail is reachable **and the tool is not even offered** |
+| denylist that always wins | checked before the allowlist, so adding `~` as a root does not re-expose `~/.ssh` |
+| **paths, never contents** | `locate` answers *where* and *how big*. Reading still goes through `PathJail`, so a mistake here leaks a filename, not a key |
+
+That last line is what makes this shippable before quarantine and dry-run exist.
+Slot 54 only has to add the write half.
+
+**Syntax hazards are reused, not restated.** `reject_dangerous_syntax` was
+extracted from `PathJail` and both guards call it, so UNC, drive-relative, device
+names, ADS and NUL cannot be present in one guard and missing from the other.
+Same reasoning as the Claude Code hook calling `resolve_for_write` rather than
+re-expressing the rule as SDK deny globs. The jail's own escape suite is
+unchanged and still green against the extracted version.
+
+**Two things worth keeping:**
+
+- **The junction trick.** `symlink_to` needs privilege on Windows, so
+  `skipif(os.name == "nt")` would have skipped the escape that matters most on
+  the only platform this runs on. A **junction** (`mklink /J`) needs no
+  privilege and `os.path.realpath` resolves it identically, so the link escapes
+  are tested against a real reparse point here — zero skips.
+- **"Refused to look" is not "found nothing".** A tool that returned `[]` when
+  denied would teach the model the machine is empty. It raises instead.
+
+#### The defect only running it could find
+
+`locate("orchestrator")` over a real home directory **had not returned after two
+minutes.** A cap on *results* does not bound a search that finds nothing —
+`os.walk` keeps traversing. Inside a task that is unbounded wall clock, which is
+the same shape as **F-06**.
+
+Bounded three ways now — `max_results`, `max_depth` (8), `timeout_seconds` (5) —
+and `LocateResult.truncated` says which bound was hit, because *"no matches"* and
+*"gave up after five seconds"* are different answers and a model told the first
+stops asking. Measured after the fix:
+
+```
+locate("orchestrator") over ~     (no matches — search stopped early: time limit)   5.0s
+locate("*.toml") over the repo    6 match(es) (truncated: result cap)               0.10s
+```
+
+Verified on the real machine: `~/.ssh`, `~/.aws`, `~/.claude`, `~/.gnupg` all
+denied with `~` as an allowed root; `id_rsa`, `*.pem`, `.env`, `*.kdbx` return
+nothing; UNC, drive-relative, `C:/Windows` and device names all refused.
+
+**Shipped closed.** Every policy file has `roots = []`, so this grants nothing
+until someone uncomments a root — and a test asserts that for all three configs.
+
+---
 
 ## Block K — Voice (Slots 49–53)
 

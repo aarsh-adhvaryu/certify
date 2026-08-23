@@ -46,6 +46,53 @@ _DEVICE_NAMES = frozenset(
 _DRIVE_RELATIVE = re.compile(r"^[A-Za-z]:(?![\\/])")
 
 
+def reject_dangerous_syntax(raw: str, guard: str = GUARD) -> None:
+    """Refuse path syntax that is a hazard before containment is even asked.
+
+    Module-level so a second, differently-shaped guard can reuse it rather than
+    restate it. `DiscoveryScope` (Slot 51) has a completely different
+    containment rule — an allowlist of roots instead of one — but the syntax
+    hazards are properties of Windows paths, not of any particular jail, and two
+    copies of this list would drift the moment one of them learned something.
+
+    The same reasoning as the Claude Code hook calling `resolve_for_write`
+    rather than restating the rule as SDK deny globs.
+    """
+    if not raw or not raw.strip():
+        raise GuardDenied(guard, raw, "empty path")
+
+    if "\x00" in raw:
+        # A NUL truncates the path in some C APIs, so what gets checked and
+        # what gets opened can differ.
+        raise GuardDenied(guard, raw, "path contains a NUL byte")
+
+    if raw.startswith(("\\\\", "//")):
+        raise GuardDenied(guard, raw, "UNC paths reach the network")
+
+    if _DRIVE_RELATIVE.match(raw):
+        raise GuardDenied(
+            guard,
+            raw,
+            "drive-relative path: 'D:foo' means foo relative to the current "
+            "directory on D:, which is not under the jail",
+        )
+
+    # PureWindowsPath regardless of host, so the rules do not quietly relax
+    # when this runs somewhere other than Windows.
+    pure = PureWindowsPath(raw)
+    parts = pure.parts[1:] if pure.anchor else pure.parts
+
+    for part in parts:
+        stem = part.split(".")[0].upper().rstrip(" ")
+        if stem in _DEVICE_NAMES:
+            raise GuardDenied(guard, raw, f"{part!r} is a reserved Windows device name")
+        if ":" in part:
+            # An alternate data stream writes a hidden second stream that most
+            # tooling never displays. The drive anchor is excluded above, so any
+            # remaining colon is a stream separator.
+            raise GuardDenied(guard, raw, f"{part!r} names an alternate data stream")
+
+
 class PathJail:
     """Resolves candidate paths, or refuses them."""
 
@@ -138,43 +185,7 @@ class PathJail:
     # -- internals ---------------------------------------------------------
 
     def _reject_syntax(self, raw: str) -> None:
-        if not raw or not raw.strip():
-            raise GuardDenied(GUARD, raw, "empty path")
-
-        if "\x00" in raw:
-            # A NUL truncates the path in some C APIs, so what gets checked and
-            # what gets opened can differ.
-            raise GuardDenied(GUARD, raw, "path contains a NUL byte")
-
-        if raw.startswith(("\\\\", "//")):
-            raise GuardDenied(GUARD, raw, "UNC paths reach the network")
-
-        if _DRIVE_RELATIVE.match(raw):
-            raise GuardDenied(
-                GUARD,
-                raw,
-                "drive-relative path: 'D:foo' means foo relative to the current "
-                "directory on D:, which is not under the jail",
-            )
-
-        # PureWindowsPath regardless of host, so the rules do not quietly relax
-        # when this runs somewhere other than Windows.
-        pure = PureWindowsPath(raw)
-        parts = pure.parts[1:] if pure.anchor else pure.parts
-
-        for part in parts:
-            stem = part.split(".")[0].upper().rstrip(" ")
-            if stem in _DEVICE_NAMES:
-                raise GuardDenied(
-                    GUARD, raw, f"{part!r} is a reserved Windows device name"
-                )
-            if ":" in part:
-                # An alternate data stream writes a hidden second stream that
-                # most tooling never displays. The drive anchor is excluded
-                # above, so any remaining colon is a stream separator.
-                raise GuardDenied(
-                    GUARD, raw, f"{part!r} names an alternate data stream"
-                )
+        reject_dangerous_syntax(raw, GUARD)
 
     def _is_inside(self, resolved: Path) -> bool:
         """Containment by path parts, not by string prefix.

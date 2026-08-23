@@ -1,5 +1,3 @@
-# Policy for the TEST SUITE. Independent of the project's, so tuning real
-# budget ceilings cannot change what the tests assert.
 # Operating policy — the tunable half of the system.
 #
 # The rules that are cheap to enforce and expensive to get wrong live in code
@@ -64,8 +62,8 @@ resume_on_start = true
 # costs well under a cent, so $0.10 is roughly 20x headroom on a single task and
 # still stops a runaway loop before it matters. Raise them once there is evidence
 # of what a task actually costs — the logbook will say.
-per_task_usd = "0.50"
-per_day_usd = "5.00"
+per_task_usd = "0.10"
+per_day_usd = "1.00"
 
 [context]
 # Append failures to the volatile tail instead of rebuilding the prompt: keeps
@@ -92,11 +90,29 @@ on_final_escalation = "max"
 # this many times, then the task goes to a human.
 max_spec_repair_attempts = 2
 
+# Slot 48e. Hand back a directive that asks for an improvement with no way to
+# tell whether it arrived — "Make the retriever better." was completed by BOTH
+# execution planes and certified by the gate both times, at $0.079 and $0.31.
+#
+# An evaluative word alone does not trip it; one with no threshold, example,
+# enumeration or stated outcome anywhere in the directive does. Turn it off if
+# it ever refuses real work: over-refusing is the worse failure, because it is
+# silent and the user just stops trusting the thing.
+require_falsifiable_directive = true
+
 # Who writes the acceptance tests. "separate" means a distinct worker call
 # authors them first and the file is then frozen read-only to the implementer.
 # If the implementer writes both the code and the tests, the gate is theater.
 test_authorship = "separate"
-test_author_role = "low"
+# Authorship runs on the INTERNAL worker over HTTP whichever execution plane is
+# selected (see operator.py). Pointing it at an execution tier breaks the moment
+# that tier moves to `claude_code`, which has no base_url — and, worse, it would
+# change how acceptance tests are written between the baseline and the candidate,
+# so the two runs would no longer be like-for-like.
+#
+# The conductor is the one role guaranteed to stay on an HTTP provider. It is
+# also a stronger author/implementer separation than `low` ever was.
+test_author_role = "conductor"
 
 # Escalation is verifier-driven and bypasses judgement by design. Re-planning
 # here would fire the most expensive token in the system on the path that is

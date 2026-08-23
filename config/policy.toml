@@ -9,9 +9,36 @@
 # against the project root.
 root = "workspace"
 
+[discovery]
+# Where a worker may LOOK, as opposed to where it may write (Slot 51).
+#
+# Read-only by construction: `locate` answers where something is and how big it
+# is, never what is in it. Reading contents still goes through the path jail, so
+# a mistake here leaks a filename rather than a key.
+#
+# DENY BY DEFAULT — an empty list means nothing outside the workspace is
+# reachable and the `locate` tool is not even offered to the model. Uncomment a
+# root to grant reach; the denylist below always wins over anything you add, so
+# putting your home directory here does not re-expose ~/.ssh.
+roots = []
+# roots = ["~/code", "~/Downloads", "~/AppData/Local/Temp"]
+
+# Cap on hits, applied while walking. An uncapped search over a whole drive is a
+# context-window and latency problem long before it is a useful answer.
+max_results = 200
+
+# Omitted on purpose: `deny_dirs` and `deny_names` default to the shipped
+# credential lists in guards/discovery.py (~/.ssh, ~/.aws, browser profiles,
+# *.pem, id_rsa*, .env …). Setting either here REPLACES the default rather than
+# adding to it, so an explicit `deny_names = []` genuinely disables that filter.
+
 [execution]
 # "windows" or "wsl:<distro>". Perception stays Windows-native either way.
 backend = "windows"
+# Claude Code is the preferred execution plane; the internal worker is what
+# remains when the subscription saturates. The provider on each role decides
+# which one a dispatch actually reaches (Slot 49) — this records the intent.
+plane = "claude_code"
 command_timeout_seconds = 300.0
 # A model that keeps calling tools without converging is burning money in a loop
 # the verifier never gets to judge. The cap is deterministic, not the model's call.
@@ -66,6 +93,16 @@ on_final_escalation = "max"
 # A malformed task spec is never passed downstream; it is handed back for repair
 # this many times, then the task goes to a human.
 max_spec_repair_attempts = 2
+
+# Slot 48e. Hand back a directive that asks for an improvement with no way to
+# tell whether it arrived — "Make the retriever better." was completed by BOTH
+# execution planes and certified by the gate both times, at $0.079 and $0.31.
+#
+# An evaluative word alone does not trip it; one with no threshold, example,
+# enumeration or stated outcome anywhere in the directive does. Turn it off if
+# it ever refuses real work: over-refusing is the worse failure, because it is
+# silent and the user just stops trusting the thing.
+require_falsifiable_directive = true
 
 # Who writes the acceptance tests. "separate" means a distinct worker call
 # authors them first and the file is then frozen read-only to the implementer.

@@ -91,6 +91,14 @@ class RunReport(Strict):
     """Stated so a reader never has to wonder whether these numbers are a blend
     of two vendors. The harness pins it off; this records that it did."""
 
+    plane: str = ""
+    """The execution plane that actually ran the attempts.
+
+    Recorded because `roles` names models, not planes: two runs can share every
+    model id and still be measuring different things. Read off the Operator
+    after construction rather than from config, so an injected plane cannot be
+    reported under the name of the configured one."""
+
     @property
     def total(self) -> int:
         return len(self.results)
@@ -176,6 +184,8 @@ class RunReport(Strict):
         ]
         roles = ", ".join(f"{k}={v}" for k, v in sorted(self.roles.items()))
         lines.append(f"    roles      {roles}")
+        if self.plane:
+            lines.append(f"    plane      {self.plane}")
         return "\n".join(line for line in lines if line)
 
     def failures(self) -> list[TaskResult]:
@@ -305,6 +315,7 @@ class Harness:
         clock: Clock | None = None,
         transport=None,
         gate=None,
+        plane=None,
         checkpoint: Path | None = None,
     ) -> None:
         self.suite = suite
@@ -320,6 +331,13 @@ class Harness:
         self._clock = clock or SystemClock()
         self._transport = transport
         self._gate = gate
+        self._plane = plane
+        # Named the same way the Operator names it, so an injected plane is
+        # never reported under the configured plane's name.
+        self._plane_name = (
+            type(plane).__name__ if plane is not None
+            else self.settings.policy.execution.plane
+        )
         self._checkpoint = Path(checkpoint) if checkpoint else None
 
     async def run(self, tasks: list[EvalTask] | None = None) -> RunReport:
@@ -331,6 +349,7 @@ class Harness:
             roles={
                 role.value: self.settings.registry.roles[role].model_id for role in Role
             },
+            plane=self._plane_name,
         )
         report.results.extend(self._resume_from_checkpoint())
         already = {r.task_id for r in report.results}
@@ -386,13 +405,20 @@ class Harness:
             self.suite.stage(task, self.settings.jail_root)
 
             operator = Operator(
-                self.settings, transport=self._transport, clock=self._clock, gate=self._gate
+                self.settings, transport=self._transport, clock=self._clock,
+                gate=self._gate, plane=self._plane,
             )
             await operator.start()
             settled = await operator.run_directive(
                 task.directive, timeout=task.timeout_seconds
             )
             attempts = await operator.store.list_attempts(settled.task_id)
+            # `settled.cost_usd` is the task rollup, which counts every call the
+            # ledger saw — including a flat-rate plane's list-equivalent price for
+            # work that billed nothing. Asking the ledger for the billable subset
+            # is the only place the two numbers are distinguishable, and reading
+            # it here is what keeps `RunReport.cost` real money.
+            billable = await operator.store.task_spend(settled.task_id)
             # A task the wire killed never reached a verdict. Scoring it as a
             # failure would credit the model with an outage — the same conflation
             # `FailureClass` exists to prevent everywhere else in the system.
@@ -404,6 +430,7 @@ class Harness:
                 status=settled.status.value,
                 attempts=len(attempts),
                 cost_usd=settled.cost_usd,
+                billable_cost_usd=None if billable == settled.cost_usd else billable,
                 seconds=time.monotonic() - started,
                 role_chosen=attempts[-1].role if attempts else None,
                 difficulty_expected=task.difficulty.value,

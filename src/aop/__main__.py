@@ -22,6 +22,7 @@ from aop.core.config import ConfigError, load_settings
 from aop.core.schemas import Role, TaskStatus
 from aop.daemon.shell import DEFAULT_HOTKEY
 from aop.operator import Operator
+from aop.registry.registry import Registry
 
 DEFAULT_PORT = 8765
 
@@ -41,13 +42,25 @@ def _banner(settings) -> str:
         if not (settings.registry.roles[r].price_in == 0 and settings.registry.roles[r].price_out == 0)
     ]
     money = f"SPENDING on: {', '.join(spending)}" if spending else "all roles free (mock provider)"
-    return (
-        f"  workspace  {settings.jail_root}\n"
-        f"  backend    {settings.policy.execution.backend}\n"
+    lines = [
+        f"  workspace  {settings.jail_root}",
+        f"  backend    {settings.policy.execution.backend}",
+        f"  plane      {settings.policy.execution.plane}",
         f"  budget     ${settings.policy.budget.per_task_usd}/task  "
-        f"${settings.policy.budget.per_day_usd}/day\n"
-        f"  models     {money}"
-    )
+        f"${settings.policy.budget.per_day_usd}/day",
+        f"  models     {money}",
+    ]
+    # Say up front which credentials are missing rather than discovering it one
+    # failed dispatch at a time. `missing_credentials()` was written for exactly
+    # this and nothing ever called it, so a shell without the key started a run
+    # normally and died on the first model call — the error it exists to prevent.
+    missing = Registry(settings.registry).missing_credentials()
+    if missing:
+        named = ", ".join(
+            f"{r.value} needs ${settings.registry.roles[r].api_key_ref}" for r in missing
+        )
+        lines.append(f"  MISSING    {named}")
+    return "\n".join(lines)
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -201,6 +214,41 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return asyncio.run(main())
 
 
+def cmd_compare(args: argparse.Namespace) -> int:
+    """Read two saved reports and say which allocation won.
+
+    `Comparison` and `on_common_tasks()` existed with no way to reach them from
+    a shell, so the Slot 48d verdict was assembled by hand in a Python session —
+    which is how a corrected cost figure ended up in the notes without ever
+    passing back through the instrument that produced the wrong one.
+    """
+    from aop.evals import Comparison, RunReport
+
+    reports = []
+    for path in (args.incumbent, args.candidate):
+        try:
+            reports.append(RunReport.model_validate_json(Path(path).read_text(encoding="utf-8")))
+        except (OSError, ValueError) as exc:
+            print(f"cannot read {path}: {exc}", file=sys.stderr)
+            return 2
+
+    comparison = Comparison(incumbent=reports[0], candidate=reports[1])
+    print()
+    print(comparison.describe())
+
+    # The strict verdict stays the headline. The narrowed one is printed only
+    # when the strict one refused *and* there is genuine overlap to report, so a
+    # restricted answer can never be mistaken for the full one.
+    if not comparison.comparable:
+        narrowed = comparison.on_common_tasks()
+        if narrowed.incumbent.total:
+            print()
+            print("  restricted to the tasks both runs graded:")
+            print(narrowed.describe())
+    print()
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     settings = _load(args)
     print(f"\n{_banner(settings)}\n")
@@ -272,6 +320,11 @@ def main(argv: list[str] | None = None) -> int:
     eval_cmd.add_argument("--limit", type=int, help="only the first N tasks")
     eval_cmd.add_argument("--out", help="write the report as JSON")
     eval_cmd.set_defaults(func=cmd_eval)
+
+    cmp_cmd = subs.add_parser("compare", help="read two saved eval reports and say which won")
+    cmp_cmd.add_argument("incumbent", help="path to the incumbent's report JSON")
+    cmp_cmd.add_argument("candidate", help="path to the candidate's report JSON")
+    cmp_cmd.set_defaults(func=cmd_compare)
 
     status_cmd = subs.add_parser("status", help="show what the daemon believes")
     status_cmd.set_defaults(func=cmd_status)

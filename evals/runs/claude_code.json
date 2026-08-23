@@ -15,7 +15,8 @@
       "difficulty_expected": "simple",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0161101090"
     },
     {
       "task_id": "relative-default-path",
@@ -29,7 +30,8 @@
       "difficulty_expected": "simple",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0210967460"
     },
     {
       "task_id": "drop-prints",
@@ -43,7 +45,8 @@
       "difficulty_expected": "simple",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0167185580"
     },
     {
       "task_id": "short-token-loss",
@@ -57,7 +60,8 @@
       "difficulty_expected": "medium",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0115662440"
     },
     {
       "task_id": "topk-shortfall",
@@ -71,7 +75,8 @@
       "difficulty_expected": "medium",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0197207250"
     },
     {
       "task_id": "sufficiency-contradiction",
@@ -85,7 +90,8 @@
       "difficulty_expected": "medium",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0227791230"
     },
     {
       "task_id": "unknown-intent",
@@ -99,7 +105,8 @@
       "difficulty_expected": "medium",
       "error": null,
       "ran": false,
-      "not_run_reason": "TransportError: deepseek-v4-pro: ReadError('')"
+      "not_run_reason": "TransportError: deepseek-v4-pro: ReadError('')",
+      "billable_cost_usd": null
     },
     {
       "task_id": "gate-coverage",
@@ -113,7 +120,8 @@
       "difficulty_expected": "hard",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0228638320"
     },
     {
       "task_id": "tokenizer-extraction",
@@ -127,7 +135,8 @@
       "difficulty_expected": "hard",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0157966770"
     },
     {
       "task_id": "underspecified",
@@ -141,7 +150,8 @@
       "difficulty_expected": "medium",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0549741980"
     },
     {
       "task_id": "impossible-offline",
@@ -155,7 +165,8 @@
       "difficulty_expected": "hard",
       "error": null,
       "ran": true,
-      "not_run_reason": null
+      "not_run_reason": null,
+      "billable_cost_usd": "0.0633456280"
     }
   ],
   "roles": {
@@ -164,5 +175,6 @@
     "high": "claude-sonnet-5",
     "max": "claude-sonnet-5"
   },
-  "failover": false
+  "failover": false,
+  "plane": "claude_code"
 }

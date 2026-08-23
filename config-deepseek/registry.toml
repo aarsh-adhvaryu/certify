@@ -1,3 +1,12 @@
+# INCUMBENT BASELINE — preserved 22 Aug 2026. Pure DeepSeek, every role.
+#
+# This is the side of Slot 48d that `evals/runs/deepseek.json` was measured on.
+# `config/` moved to the Claude Code plane; this stays so the incumbent half of
+# that comparison can be re-run. Editing it makes the saved report
+# non-reproducible, which is the one thing the eval harness exists to prevent.
+#
+#   python -m aop --config config-deepseek eval --label deepseek
+#
 # Model registry - the ONLY place a model name may appear.
 #
 # Code references role slots (conductor / low / high / max), never model names,
@@ -54,43 +63,7 @@ reasoning_effort = false
 supports_caching = true
 
 
-# ---------------------------------------------------------------------------
-# Execution tiers — Claude Code preferred, DeepSeek underneath.
-#
-# THE SPLIT IS THE POINT. The conductor stays on DeepSeek: it plans, it talks,
-# and it is ~60% of a task's bill (3,605 output tokens for planning against 338
-# for the work). Claude Code is excellent at the coding and expensive as a
-# conversationalist, so it gets the coding and nothing else.
-#
-# `fallback` is the sideways move for FailureClass.TRANSPORT — quota saturated,
-# credit gone, wire dead. Never for a verifier failure: that climbs the ladder
-# instead. When the subscription runs out mid-task the tier steps to DeepSeek
-# and *the plane steps with it* (Slot 49) — a claude_code vendor and an HTTP
-# vendor do not live on the same plane, and before 49 only the model id moved.
-#
-# Prices are omitted on the claude_code entries and therefore zero, which is what
-# `Registry.is_free()` reports at flat rate. The ledger still records every call
-# — quiet, not blind — and wakes the moment a fallback spends real money.
-#
-# THE PLAN IS PRO, so all three rungs are Sonnet. Escalation therefore retries
-# with the failure appended rather than actually getting stronger. That is
-# honest, not a working ladder — see F-02 in NEXT-PLAN.md.
-# ---------------------------------------------------------------------------
-
 [roles.low]
-provider = "claude_code"
-model_id = "claude-sonnet-5"
-
-[roles.low.capabilities]
-context_window = 200000
-modality = "text"
-tool_use = true
-reasoning_effort = false
-supports_caching = true
-
-# Sideways when the subscription saturates. Same strength, different vendor —
-# and a different execution plane, which is what Slot 49 made work.
-[[roles.low.fallback]]
 provider = "openai"
 model_id = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com"
@@ -99,10 +72,10 @@ price_in = "0.14"
 price_out = "0.28"
 price_cached_in = "0.0028"
 
-[roles.low.fallback.params]
+[roles.low.params]
 temperature = 0.0
 
-[roles.low.fallback.capabilities]
+[roles.low.capabilities]
 context_window = 1000000
 modality = "text"
 tool_use = true
@@ -111,19 +84,6 @@ supports_caching = true
 
 
 [roles.high]
-provider = "claude_code"
-model_id = "claude-sonnet-5"
-
-[roles.high.capabilities]
-context_window = 200000
-modality = "text"
-tool_use = true
-reasoning_effort = false
-supports_caching = true
-
-# Sideways when the subscription saturates. Same strength, different vendor —
-# and a different execution plane, which is what Slot 49 made work.
-[[roles.high.fallback]]
 provider = "openai"
 model_id = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com"
@@ -132,10 +92,10 @@ price_in = "0.435"
 price_out = "0.87"
 price_cached_in = "0.003625"
 
-[roles.high.fallback.params]
+[roles.high.params]
 temperature = 0.0
 
-[roles.high.fallback.capabilities]
+[roles.high.capabilities]
 context_window = 1000000
 modality = "text"
 tool_use = true
@@ -143,20 +103,8 @@ reasoning_effort = false
 supports_caching = true
 
 
+# Same model as `high` until a second vendor arrives - see the note at the top.
 [roles.max]
-provider = "claude_code"
-model_id = "claude-sonnet-5"
-
-[roles.max.capabilities]
-context_window = 200000
-modality = "text"
-tool_use = true
-reasoning_effort = false
-supports_caching = true
-
-# Sideways when the subscription saturates. Same strength, different vendor —
-# and a different execution plane, which is what Slot 49 made work.
-[[roles.max.fallback]]
 provider = "openai"
 model_id = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com"
@@ -165,10 +113,10 @@ price_in = "0.435"
 price_out = "0.87"
 price_cached_in = "0.003625"
 
-[roles.max.fallback.params]
+[roles.max.params]
 temperature = 0.0
 
-[roles.max.fallback.capabilities]
+[roles.max.capabilities]
 context_window = 1000000
 modality = "text"
 tool_use = true

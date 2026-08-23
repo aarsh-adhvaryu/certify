@@ -422,6 +422,17 @@ class ConductorPolicy(_Strict):
     conductor thinking dominates the bill — firing it on the path that is
     already going badly is the most expensive available reflex."""
 
+    require_falsifiable_directive: bool = True
+    """Hand back a directive that asks for an improvement with no way to tell
+    whether it arrived (Slot 48e).
+
+    On, because the alternative is measured: *"Make the retriever better."* was
+    completed by both execution planes and certified by the gate both times. But
+    it is configuration rather than a constant, because over-refusing is the
+    worse of the two failures — a gate that rejects real work fails silently and
+    costs the user's trust, where one that accepts vague work at least produces
+    something to argue with."""
+
 
 class StreamPolicy(_Strict):
     tokens: bool = True
@@ -442,8 +453,37 @@ class CommandPolicy(_Strict):
     catastrophic default to get wrong."""
 
 
+class DiscoveryPolicy(_Strict):
+    """Where a worker may *look*, outside the jail (Slot 51).
+
+    Read-only by construction: `locate` answers where something is and how big
+    it is, never what is in it. Reading contents stays inside `PathJail`, so a
+    mistake here leaks a filename rather than a key."""
+
+    roots: list[str] = Field(default_factory=list)
+    """Searchable roots. Empty means nothing outside the workspace is reachable —
+    deny-by-default, the same posture as the command allowlist and for the same
+    reason: the opposite default is catastrophic to get wrong once."""
+
+    deny_dirs: list[str] | None = None
+    """Directories never searched, overriding `roots`. None keeps the shipped
+    credential list (`~/.ssh`, `~/.aws`, browser profiles…), which is what you
+    want unless you have a specific reason. An explicit list replaces it, so
+    setting `[]` genuinely disables directory denial."""
+
+    deny_names: list[str] | None = None
+    """Filename globs never returned, wherever they live. None keeps the shipped
+    list. Catches the secret dropped into an otherwise reasonable folder, which
+    a directory denylist misses entirely."""
+
+    max_results: int = Field(default=200, ge=1)
+    """Cap on hits, applied while walking. An uncapped search over a whole drive
+    is a context-window and latency problem long before it is a useful answer."""
+
+
 class PolicyConfig(_Strict):
     jail: JailPolicy = Field(default_factory=JailPolicy)
+    discovery: DiscoveryPolicy = Field(default_factory=DiscoveryPolicy)
     execution: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
     ladder: LadderPolicy = Field(default_factory=LadderPolicy)
     scheduler: SchedulerPolicy = Field(default_factory=SchedulerPolicy)
