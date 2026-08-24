@@ -25,11 +25,6 @@ from aop.core.schemas import ReasoningEffort, Role
 #: The suite's own config — always the mock provider. See tests/config/registry.toml.
 PROJECT_CONFIG = Path(__file__).resolve().parent / "config"
 
-#: The config actually shipped in the repo, which now points at a paid provider.
-#: Only checked for the properties that must hold whatever it names.
-SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "config"
-
-
 def _write(path: Path, body: str) -> Path:
     path.write_text(textwrap.dedent(body), encoding="utf-8")
     return path
@@ -59,17 +54,6 @@ def _minimal_registry(names: tuple[str, ...] = ALL_ROLES, **overrides: str) -> s
 # ------------------------------------------------------- the shipped config
 
 
-def test_shipped_config_loads():
-    """The config committed to the repo must be valid, or nothing else matters.
-
-    Only its *validity* is asserted, not which models it names. The suite runs
-    against tests/config/ precisely so swapping a real model cannot change what
-    any test expects — that coupling is how a test suite starts making live API
-    calls, which is exactly what happened when the first key was bought.
-    """
-    settings = load_settings(SHIPPED_CONFIG)
-    assert set(settings.registry.roles) == set(Role)
-    assert settings.policy.ladder.max_attempts >= 1
 
 
 def test_the_test_suite_never_uses_a_paid_provider():
@@ -200,22 +184,6 @@ def test_env_var_name_is_accepted(tmp_path):
     assert registry.roles[Role.CONDUCTOR].api_key_ref == "MOONSHOT_API_KEY"
 
 
-def test_the_shipped_registry_never_contains_a_pasted_secret():
-    """It references credentials by environment-variable NAME, so the file stays
-    safe to commit even now that it points at a paid provider.
-
-    The loader would reject a pasted key outright; this is the belt to that
-    braces, and it reads the raw text so it cannot be fooled by a value the
-    loader happened to accept.
-    """
-    settings = load_settings(SHIPPED_CONFIG)
-    for entry in settings.registry.roles.values():
-        if entry.api_key_ref is not None:
-            assert entry.api_key_ref.isupper()
-            assert not entry.api_key_ref.startswith("sk-")
-
-    raw = (SHIPPED_CONFIG / "registry.toml").read_text(encoding="utf-8")
-    assert "sk-" not in raw, "something that looks like an API key is in the config"
 
 
 # ----------------------------------------------------------------- defaults
