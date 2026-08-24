@@ -179,7 +179,6 @@ async def test_record_attempt_round_trips(store):
         failure_reason="2 failed, 1 passed",
         tokens_in=1200,
         tokens_out=340,
-        features={"goal_len": 42.0},
     )
     await store.record_attempt(attempt)
 
@@ -233,14 +232,17 @@ async def test_deleting_a_task_cascades_to_attempts(store):
     assert await store.list_attempts(task.task_id) == []
 
 
-# ------------------------------------------------------ training eligibility
+# ------------------------------------------------------- failure eligibility
 
 
-async def test_training_rows_exclude_guard_and_transport_and_budget(store):
-    """Excluded at the read, not left to the caller to remember.
+async def test_every_failure_class_round_trips(store):
+    """`training_rows()` used to filter these at the read, for a router that the
+    22 Aug audit showed was training on a constant. Both went in slot 0.2.
 
-    None of these says anything about whether the tier was capable, and letting
-    them through would teach the router that jail typos mean a task was hard.
+    The distinction they encoded did not: a guard trip is not a verifier failure,
+    and confusing the two is how a Monday subscription reset reads as "the cheap
+    tier failed four tasks in a row". It lives on FailureClass now — consult the
+    type, do not re-derive it.
     """
     task = await store.create_task("x")
     classes = [
@@ -255,28 +257,11 @@ async def test_training_rows_exclude_guard_and_transport_and_budget(store):
             _attempt(task_id=task.task_id, index=i, failure_class=fc)
         )
 
-    rows = await store.training_rows()
-    assert {a.failure_class for a in rows} == {FailureClass.NONE, FailureClass.VERIFIER}
-
-
-async def test_escalation_chain_yields_a_label_for_each_tier(store):
-    """The ladder is the router's data-generating process: one piece of work
-    produces evidence about a tier the system did not end up using."""
-    task = await store.create_task("hard one")
-    await store.record_attempt(
-        _attempt(task_id=task.task_id, index=0, role=Role.LOW,
-                 failure_class=FailureClass.VERIFIER, verdict=VerdictStatus.FAIL)
-    )
-    await store.record_attempt(
-        _attempt(task_id=task.task_id, index=1, role=Role.HIGH,
-                 failure_class=FailureClass.NONE, verdict=VerdictStatus.PASS)
-    )
-
-    rows = await store.training_rows()
-    assert [(a.role, a.verdict) for a in rows] == [
-        (Role.LOW, VerdictStatus.FAIL),
-        (Role.HIGH, VerdictStatus.PASS),
-    ]
+    rows = await store.list_attempts(task.task_id)
+    assert [a.failure_class for a in rows] == classes
+    assert {a.failure_class for a in rows if a.failure_class.escalates} == {
+        FailureClass.VERIFIER
+    }
 
 
 # ---------------------------------------------------------------------- spend
@@ -370,10 +355,8 @@ async def test_an_attempt_lands_in_both_ledgers(store):
         purpose="plan", role=Role.CONDUCTOR, model_id="m",
         cost_usd=Decimal("0.09"), task_id=task.task_id,
     )
-    assert len(await store.list_attempts(task.task_id)) == 1, "planning polluted the labels"
-    assert await store.training_rows() and all(
-        a.failure_class.trains_router for a in await store.training_rows()
-    )
+    assert len(await store.list_attempts(task.task_id)) == 1, "planning polluted attempts"
+    assert await store.task_spend(task.task_id) == Decimal("0.14")
 
 
 async def test_daily_spend_includes_planning(store):

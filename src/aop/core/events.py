@@ -44,7 +44,6 @@ class EventKind(str, Enum):
     ATTEMPT_FINISHED = "attempt_finished"
     TOKEN = "token"
     VERDICT = "verdict"
-    ROUTED = "routed"
     GUARD_DENIED = "guard_denied"
     BUDGET = "budget"
     JOURNAL_WRITTEN = "journal_written"
@@ -113,15 +112,6 @@ class VerdictReached(Event):
     status: VerdictStatus
     failure_class: FailureClass
     reason: str | None = None
-
-
-class Routed(Event):
-    kind: Literal[EventKind.ROUTED] = EventKind.ROUTED
-    role: Role
-    router: str
-    """Which router decided — 'rules' or 'classifier'. Needed to compare them."""
-    needs_pixels: bool = False
-    rationale: str | None = None
 
 
 class GuardDenied(Event):

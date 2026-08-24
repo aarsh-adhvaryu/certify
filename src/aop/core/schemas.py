@@ -45,36 +45,6 @@ class Role(str, Enum):
 
 
 #: Execution tiers in escalation order. The conductor is not an execution tier.
-EXECUTION_LADDER: tuple[Role, ...] = (Role.LOW, Role.HIGH, Role.MAX)
-
-
-def next_tier(current: Role) -> Role | None:
-    """The tier one rung up the ladder, or None at the top."""
-    if current not in EXECUTION_LADDER:
-        raise ValueError(f"{current!r} is not an execution tier")
-    idx = EXECUTION_LADDER.index(current)
-    if idx + 1 >= len(EXECUTION_LADDER):
-        return None
-    return EXECUTION_LADDER[idx + 1]
-
-
-class Difficulty(str, Enum):
-    """The conductor's difficulty call. The router treats it as one feature
-    among several, not as an instruction."""
-
-    SIMPLE = "simple"
-    MEDIUM = "medium"
-    HARD = "hard"
-
-
-class ReasoningEffort(str, Enum):
-    """Conductor thinking budget — the single biggest cost dial (spec §4)."""
-
-    LOW = "low"
-    HIGH = "high"
-    MAX = "max"
-
-
 # --------------------------------------------------------------------------
 # Failure taxonomy
 # --------------------------------------------------------------------------
@@ -236,12 +206,6 @@ class TaskSpec(Strict):
     """Jail-relative paths this task may touch. Absolute paths are rejected here
     so a spec cannot even express an escape."""
 
-    needs_pixels: bool = False
-    """Modality routing axis (spec §3.1). A task that needs raw pixels cannot go
-    to a text-only tier regardless of how hard it is."""
-
-    difficulty_hint: Difficulty = Difficulty.MEDIUM
-
     @field_validator("artifacts")
     @classmethod
     def _relative_artifacts(cls, paths: list[str]) -> list[str]:
@@ -301,9 +265,6 @@ class Attempt(Strict):
     started_at: datetime
     ended_at: datetime | None = None
 
-    features: dict[str, float] = Field(default_factory=dict)
-    """Router feature vector as it was at dispatch time. Snapshotted rather than
-    recomputed, so retraining is not silently retroactive when extraction changes."""
 
     @property
     def trains_router(self) -> bool:
@@ -314,64 +275,6 @@ class Attempt(Strict):
     def _tz_aware(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.tzinfo is None:
             raise ValueError("timestamps must be timezone-aware")
-        return value
-
-
-# --------------------------------------------------------------------------
-# Observation — the perception surface's only output shape
-# --------------------------------------------------------------------------
-
-
-class ObservationSource(str, Enum):
-    A11Y = "a11y"
-    VISION = "vision"
-
-
-class UIElement(Strict):
-    element_id: int
-    role: str
-    name: str | None = None
-    bounds: tuple[int, int, int, int]
-    """(left, top, right, bottom) in screen coordinates."""
-
-
-class Observation(Strict):
-    """A distilled, structured view of the screen.
-
-    Both perception backends emit this identical shape, so the conductor never
-    learns which one produced it (spec §8.2). That is what lets the vision
-    fallback be upgraded later without touching anything downstream.
-    """
-
-    schema_version: int = OBSERVATION_SCHEMA_VERSION
-    observation_id: str
-    captured_at: datetime
-    source: ObservationSource
-
-    app: str | None = None
-    window_title: str | None = None
-    focused_element_id: int | None = None
-    elements: list[UIElement] = Field(default_factory=list)
-
-    coverage: float = 0.0
-    """Fraction of window area described by ``elements``. Drives the mechanical
-    A11y-is-garbage detection that triggers the vision fallback (spec §8.2)."""
-
-    text: str | None = None
-    """OCR text, present when ``source`` is VISION."""
-
-    @field_validator("captured_at")
-    @classmethod
-    def _tz_aware(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            raise ValueError("captured_at must be timezone-aware")
-        return value
-
-    @field_validator("coverage")
-    @classmethod
-    def _unit_interval(cls, value: float) -> float:
-        if not 0.0 <= value <= 1.0:
-            raise ValueError(f"coverage must be in [0, 1], got {value}")
         return value
 
 

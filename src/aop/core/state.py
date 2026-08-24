@@ -42,7 +42,7 @@ from aop.core.schemas import (
     hash_directive,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class StateError(Exception):
@@ -174,6 +174,22 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE spend ADD COLUMN billable INTEGER NOT NULL DEFAULT 1;
         """,
     ),
+    (
+        5,
+        """
+        -- The router's training set, removed with the router.
+        --
+        -- The 22 Aug audit settled it on evidence rather than argument: the
+        -- conductor emitted difficulty_hint = "medium" for 13 specs out of 13,
+        -- and that field drove the two largest weights. A classifier trained on
+        -- this column would have been fitting a constant.
+        --
+        -- Appended rather than edited into migration 1, because editing an
+        -- applied migration leaves already-migrated databases silently
+        -- inconsistent with fresh ones.
+        ALTER TABLE attempts DROP COLUMN features_json;
+        """,
+    ),
 )
 
 
@@ -236,7 +252,6 @@ def _attempt_from_row(row: aiosqlite.Row) -> Attempt:
         latency_ms=row["latency_ms"],
         started_at=_dt_in(row["started_at"]),
         ended_at=_dt_in(row["ended_at"]),
-        features=json.loads(row["features_json"]),
     )
 
 
@@ -491,8 +506,8 @@ class StateStore:
                                   spec_schema_version, idx, role, model_id,
                                   verdict, failure_class, failure_reason,
                                   tokens_in, tokens_out, cost_usd, latency_ms,
-                                  started_at, ended_at, features_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  started_at, ended_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(attempt_id) DO NOTHING
             """,
             (
@@ -513,7 +528,6 @@ class StateStore:
                 attempt.latency_ms,
                 _dt_out(attempt.started_at),
                 _dt_out(attempt.ended_at),
-                json.dumps(attempt.features, sort_keys=True),
             ),
         )
         await self._conn.commit()
@@ -534,8 +548,8 @@ class StateStore:
                                   spec_schema_version, idx, role, model_id,
                                   verdict, failure_class, failure_reason,
                                   tokens_in, tokens_out, cost_usd, latency_ms,
-                                  started_at, ended_at, features_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  started_at, ended_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 attempt.attempt_id,
@@ -555,7 +569,6 @@ class StateStore:
                 attempt.latency_ms,
                 _dt_out(attempt.started_at),
                 _dt_out(attempt.ended_at),
-                json.dumps(attempt.features, sort_keys=True),
             ),
         )
         await self._conn.execute(
@@ -600,27 +613,6 @@ class StateStore:
         ) as cur:
             row = await cur.fetchone()
         return int(row["nxt"])
-
-    async def training_rows(self, *, limit: int | None = None) -> list[Attempt]:
-        """Attempts eligible as router training labels.
-
-        Guard trips, transport faults, and budget halts are excluded at the read:
-        none of them says anything about whether the tier was capable, and
-        letting them through would teach the router that jail typos mean a task
-        was hard.
-        """
-        eligible = [f.value for f in FailureClass if f.trains_router]
-        sql = (
-            f"SELECT * FROM attempts WHERE failure_class IN "
-            f"({','.join('?' * len(eligible))}) ORDER BY started_at, attempt_id"
-        )
-        params: list[Any] = list(eligible)
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(limit)
-        async with self._conn.execute(sql, params) as cur:
-            rows = await cur.fetchall()
-        return [_attempt_from_row(r) for r in rows]
 
     # -- spend -------------------------------------------------------------
 

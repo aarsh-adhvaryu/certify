@@ -16,22 +16,16 @@ from pydantic import ValidationError
 from aop.core.ids import FrozenClock, SequentialIds, SystemClock, UuidIds
 from aop.core.schemas import (
     ATTEMPT_SCHEMA_VERSION,
-    EXECUTION_LADDER,
     TASK_SPEC_SCHEMA_VERSION,
     Attempt,
-    Difficulty,
     FailureClass,
-    Observation,
-    ObservationSource,
     Role,
     Task,
     TaskSpec,
     TaskStatus,
-    UIElement,
     Verdict,
     VerdictStatus,
     hash_directive,
-    next_tier,
 )
 
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -129,22 +123,6 @@ def test_verifier_crash_does_not_look_like_a_weak_model():
 # ------------------------------------------------------------ execution ladder
 
 
-def test_ladder_order_and_top():
-    assert EXECUTION_LADDER == (Role.LOW, Role.HIGH, Role.MAX)
-    assert next_tier(Role.LOW) is Role.HIGH
-    assert next_tier(Role.HIGH) is Role.MAX
-    assert next_tier(Role.MAX) is None
-
-
-def test_conductor_is_not_an_execution_tier():
-    assert Role.CONDUCTOR not in EXECUTION_LADDER
-    with pytest.raises(ValueError, match="not an execution tier"):
-        next_tier(Role.CONDUCTOR)
-
-
-# ----------------------------------------------------------------- task spec
-
-
 def test_task_spec_pins_schema_version():
     spec = TaskSpec(spec_id="spec_1", task_id="task_1", goal="add a function")
     assert spec.schema_version == TASK_SPEC_SCHEMA_VERSION
@@ -171,13 +149,6 @@ def test_spec_accepts_relative_artifacts():
         spec_id="s", task_id="t", goal="g", artifacts=["src/mod.py", "tests/test_mod.py"]
     )
     assert len(spec.artifacts) == 2
-
-
-def test_needs_pixels_defaults_off():
-    assert TaskSpec(spec_id="s", task_id="t", goal="g").needs_pixels is False
-
-
-# -------------------------------------------------------------------- attempt
 
 
 def _attempt(**over) -> Attempt:
@@ -220,44 +191,9 @@ def test_attempt_cost_is_exact_decimal():
 
 
 def test_attempt_round_trips_through_json():
-    original = _attempt(cost_usd=Decimal("0.0123"), features={"tokens": 400.0})
+    original = _attempt(cost_usd=Decimal("0.0123"))
     restored = Attempt.model_validate_json(original.model_dump_json())
     assert restored == original
-
-
-# ---------------------------------------------------------------- observation
-
-
-def test_observation_round_trips():
-    obs = Observation(
-        observation_id="obs_1",
-        captured_at=T0,
-        source=ObservationSource.A11Y,
-        elements=[UIElement(element_id=1, role="button", name="OK", bounds=(0, 0, 10, 10))],
-        coverage=0.42,
-    )
-    assert Observation.model_validate_json(obs.model_dump_json()) == obs
-
-
-@pytest.mark.parametrize("bad", [-0.1, 1.5])
-def test_coverage_must_be_a_fraction(bad):
-    """Coverage drives the a11y-fallback threshold, so an out-of-range value
-    would silently mis-trigger the vision path."""
-    with pytest.raises(ValidationError):
-        Observation(
-            observation_id="o", captured_at=T0, source=ObservationSource.A11Y, coverage=bad
-        )
-
-
-def test_both_perception_backends_use_one_shape():
-    """The conductor must not be able to tell which backend produced this."""
-    common = dict(observation_id="o", captured_at=T0, coverage=0.5)
-    a11y = Observation(source=ObservationSource.A11Y, **common)
-    vision = Observation(source=ObservationSource.VISION, text="OK", **common)
-    assert set(a11y.model_dump()) == set(vision.model_dump())
-
-
-# --------------------------------------------------------------------- task
 
 
 def test_directive_hash_is_stable_and_byte_exact():
@@ -286,7 +222,7 @@ def test_task_round_trips():
             spec_id="spec_0001",
             task_id="task_0001",
             goal="add retry",
-            difficulty_hint=Difficulty.MEDIUM,
+            acceptance=["a retried upload succeeds"],
         ),
     )
     assert Task.model_validate_json(task.model_dump_json()) == task

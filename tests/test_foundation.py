@@ -65,8 +65,10 @@ async def test_foundation_survives_a_hard_restart(tmp_path):
         )
     )
 
-    low_model = settings.registry.roles[Role.LOW].model_id
-    high_model = settings.registry.roles[Role.HIGH].model_id
+    # What served, not what was configured. There is no registry to ask any
+    # more, and recording the registry's opinion was always the wrong answer —
+    # it diverges from reality the moment failover happens.
+    low_model, high_model = "mock-low", "mock-high"
 
     await store.record_attempt(
         Attempt(
@@ -130,9 +132,13 @@ async def test_foundation_survives_a_hard_restart(tmp_path):
     assert totals.attempt_count == 3
     assert totals.cost_usd == Decimal("0.0209")
 
-    # Only the verifier outcomes are eligible labels; the guard trip is not.
-    labels = [(a.role, a.verdict) for a in await store.training_rows()]
-    assert labels == [(Role.LOW, VerdictStatus.FAIL), (Role.HIGH, VerdictStatus.PASS)]
+    # All three attempts are recorded, and the guard trip is still marked as one
+    # — it counts toward the attempt cap but never toward escalation.
+    attempts = await store.list_attempts(task.task_id)
+    assert [(a.role, a.verdict) for a in attempts if a.failure_class.escalates] == [
+        (Role.LOW, VerdictStatus.FAIL)
+    ]
+    assert not any(a.failure_class.escalates for a in attempts if a.failure_class.name == "GUARD")
 
     watcher.close()
     kinds = {e.kind async for e in watcher}
