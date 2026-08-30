@@ -84,9 +84,18 @@ SQLite's job.
   memory, on the instance. `begin` and `verify` are separate processes, so
   containment is real within one run and absent across two. Closed by **E.1**.
   See `test_criteria.py::test_the_freeze_does_not_survive_the_process`.
-- **The write hook is unproven.** `test_hosts.py` proves the hook *works*, not
-  that it is *connected*. The previous build's hook was written, unit-tested,
-  green — and never passed to the SDK. Closed by **E.3**.
+- **The write hook is unproven** — `test_hosts.py` proves it *works*, not that it
+  is *connected*. The previous build's hook was written, unit-tested, green, and
+  never passed to the SDK. Closed by **E.3**.
+- **⚠️ Shell writes bypass the freeze entirely.** The hook reads `file_path` /
+  `notebook_path` / `path`; a Bash call carries a `command` string, so the hook
+  finds no path and allows it. `echo x > frozen.py` defeats the guard that exists
+  to stop exactly that. v1 closed this by removing the Bash tool outright —
+  *"Claude Code's Bash takes a shell string, and there is no honest way to wrap
+  it"* — and slot 0.3 rehomed the hook without that half. **A path guard and a
+  tool policy are one mechanism; porting either alone leaves containment that
+  tests green and does not hold.** See
+  `test_hosts.py::test_shell_writes_bypass_the_freeze_entirely`. Closed by E.3.
 - **`TaskStatus.SUSPENDED` and its two columns are inert.** Suspension went in
   0.3; the durable shape waits for E.1 rather than spending a migration twice.
 - **`Role` describes nothing.** conductor/low/high/max were model tiers. Left in

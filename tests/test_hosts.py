@@ -134,3 +134,54 @@ def test_read_is_not_a_write_tool():
     """Freezing gives the agent something it can read and cannot rewrite."""
     assert "Read" not in WRITE_TOOLS
     assert "Write" in WRITE_TOOLS and "Edit" in WRITE_TOOLS
+
+
+# ===================================================== known holes, kept visible
+
+
+async def test_shell_writes_bypass_the_freeze_entirely(jail, workspace):
+    """⚠️ THIS DOCUMENTS A HOLE, NOT A BEHAVIOUR. The freeze is bypassable today.
+
+    The hook reads its target from `file_path` / `notebook_path` / `path`. A Bash
+    call carries a `command` string instead, so the hook finds no path, returns
+    {} and allows it. `echo x > frozen.py` walks straight through the guard that
+    exists to stop exactly that.
+
+    The previous build knew this and closed it a different way — by removing the
+    Bash tool outright, with the reasoning recorded verbatim:
+
+        `guards/commands.py` is an argv allowlist with no shell, ever, and
+        Claude Code's Bash takes a shell *string* — there is no honest way to
+        wrap it. Removing the tool keeps the invariant; the model can still
+        write code, and we still run the gate ourselves.
+
+    Slot 0.3 rehomed `build_jail_hook` and left that half behind, which is the
+    "green in isolation, wired to nothing" failure wearing a new costume: the
+    tests above pass, and the containment they assert is defeated by `echo >`.
+
+    E.3 must restore the pairing — a hook that resolves paths AND a tool policy
+    that removes the surface it cannot parse. Delete this test when it does.
+    """
+    (workspace / "criteria.py").write_text("def test_x(): assert real()\n", encoding="utf-8")
+    jail.freeze("criteria.py")
+    hook = build_jail_hook(jail)
+
+    # The path-shaped write is correctly denied.
+    denied = await hook(
+        {"hook_event_name": "PreToolUse", "tool_name": "Write",
+         "tool_input": {"file_path": "criteria.py", "content": "def test_x(): pass"}},
+        "t", None,
+    )
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    # The same write through a shell string is not.
+    for command in (
+        "echo 'def test_x(): pass' > criteria.py",
+        "python -c \"open('criteria.py','w').write('def test_x(): pass')\"",
+        "rm criteria.py",
+    ):
+        assert await hook(
+            {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+             "tool_input": {"command": command}},
+            "t", None,
+        ) == {}, f"unexpectedly guarded: {command}"
