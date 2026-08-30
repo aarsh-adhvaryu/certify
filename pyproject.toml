@@ -1,5 +1,5 @@
 [project]
-name = "aop"
+name = "certify"
 version = "0.1.0"
 description = "A deterministic verification layer for coding agents: guards, a frozen-test gate, and a spend ledger. Zero tokens of its own."
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The local HTTP + WebSocket surface (`aop serve`), for a browser view or a
+# The local HTTP + WebSocket surface (`certify serve`), for a browser view or a
 # host wrapper to subscribe to. Not needed to verify anything.
 #
 # `websockets` belongs here as a HARD requirement of this extra, not a nicety:

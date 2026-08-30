@@ -1,23 +1,23 @@
-"""Slot 02 — configuration.
+"""Configuration — one file, ``policy.toml``.
 
-Two files, loaded and fully validated at startup:
+Everything here is a value whose right setting is an empirical question, which is
+what makes it configuration rather than a constant in the code. The rules that
+are cheap to enforce and expensive to get wrong stay in code: the path jail, the
+guard-versus-verifier split, denylist-before-allowlist.
 
-* ``registry.toml`` — every model identity, price, and capability tag. This is
-  the only place a model name is allowed to appear (spec §3.1). Swapping a model
-  is an edit here, never a code change.
-* ``policy.toml`` — the tunable knobs. Values here are empirical questions, so
-  they are configuration rather than constants baked into the code.
+There was a second file. ``registry.toml`` named a model, an endpoint, prices and
+capability tags for four roles, and nothing would load without it — so certify
+could not be installed and run by anyone who had not first chosen a vendor. It
+went with the model layer in slot 0.2.
 
-Validation is eager on purpose. A malformed price or a missing role should fail
-at load with the field path, not at 2am on the first call that happens to need it.
+Validation is eager on purpose. A malformed ceiling should fail at load with the
+field path, not at 2am on the first call that happens to need it.
 """
 
 from __future__ import annotations
 
-import re
 import tomllib
 from decimal import Decimal
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -27,15 +27,7 @@ from pydantic import (
     Field,
     ValidationError,
     field_validator,
-    model_validator,
 )
-
-LOCAL_PROVIDERS = frozenset({"claude_code"})
-"""Providers that are not reached over HTTP and therefore name no endpoint.
-
-``claude_code`` runs a local agent harness against the user's own subscription:
-there is no base_url to point at and no credential of ours to send."""
-
 
 
 class ConfigError(Exception):
@@ -48,13 +40,6 @@ class ConfigError(Exception):
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-# --------------------------------------------------------------------------
-# Registry
-# --------------------------------------------------------------------------
-
-_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 # --------------------------------------------------------------------------
@@ -93,26 +78,6 @@ class ExecutionPolicy(_Strict):
         if value == "windows" or value.startswith("wsl:"):
             return value
         raise ValueError(f"backend must be 'windows' or 'wsl:<distro>', got {value!r}")
-
-
-class LadderPolicy(_Strict):
-    """Escalation discipline (spec §8.1)."""
-
-    retries_before_escalation: int = Field(default=1, ge=0)
-    """Retries at the same tier with the failure reason appended, before moving
-    up. One catches format and transient failures cheaply."""
-
-    max_attempts: int = Field(default=4, ge=1)
-    """Hard cap across all tiers, so a doomed task cannot loop up the bill."""
-
-    failover_enabled: bool = True
-    """Whether a ``TRANSPORT`` failure may move sideways to the next vendor.
-
-    On in production: a dead vendor should not stop work when another is
-    configured. **Off during an eval**, where a run that silently half-completes
-    on a different vendor would be reported under the label of the one that was
-    asked for — a blended measurement that reads as a clean one. The harness
-    turns it off itself rather than trusting the config."""
 
 
 class BudgetPolicy(_Strict):
@@ -203,7 +168,6 @@ class PolicyConfig(_Strict):
     jail: JailPolicy = Field(default_factory=JailPolicy)
     discovery: DiscoveryPolicy = Field(default_factory=DiscoveryPolicy)
     execution: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
-    ladder: LadderPolicy = Field(default_factory=LadderPolicy)
     budget: BudgetPolicy = Field(default_factory=BudgetPolicy)
     verify: VerifyPolicy = Field(default_factory=VerifyPolicy)
     refusal: RefusalPolicy = Field(default_factory=RefusalPolicy)

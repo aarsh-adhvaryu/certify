@@ -13,8 +13,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from aop.core.ids import FrozenClock, SequentialIds, SystemClock, UuidIds
-from aop.core.schemas import (
+from certify.core.ids import FrozenClock, SequentialIds, SystemClock, UuidIds
+from certify.core.schemas import (
     ATTEMPT_SCHEMA_VERSION,
     TASK_SPEC_SCHEMA_VERSION,
     Attempt,

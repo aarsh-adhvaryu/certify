@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aop.core.schemas import FailureClass
+from certify.core.schemas import FailureClass
 
 
 class GuardDenied(Exception):

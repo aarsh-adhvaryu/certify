@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from aop.core.config import load_settings
-from aop.core.events import EventBus, EventKind
-from aop.core.ids import FrozenClock, SequentialIds
-from aop.core.journal import Journal
-from aop.core.lifecycle import TaskLifecycle
-from aop.core.schemas import (
+from certify.core.config import load_settings
+from certify.core.events import EventBus, EventKind
+from certify.core.ids import FrozenClock, SequentialIds
+from certify.core.journal import Journal
+from certify.core.lifecycle import TaskLifecycle
+from certify.core.schemas import (
     Attempt,
     FailureClass,
     Role,
@@ -26,7 +26,7 @@ from aop.core.schemas import (
     TaskStatus,
     VerdictStatus,
 )
-from aop.core.state import StateStore
+from certify.core.state import StateStore
 
 PROJECT_CONFIG = Path(__file__).resolve().parent / "config"
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -118,10 +118,10 @@ async def test_foundation_survives_a_hard_restart(tmp_path):
 
     await life.complete(task.task_id, note="verified by pytest: 4 passed")
 
-    # --- a second task parks on a slow check ------------------------------
+    # --- a second task has nothing left certify can check -----------------
     parked = await life.create("bring up the dev server and confirm it answers")
     await life.start(parked.task_id)
-    await life.suspend(parked.task_id, "polling localhost:8080", wait=timedelta(seconds=30))
+    await life.await_human(parked.task_id, "no criteria supplied and none derivable")
 
     # --- a third is left mid-flight when the process dies -----------------
     orphan = await life.create("summarise yesterday's logs")
@@ -164,7 +164,7 @@ async def test_foundation_survives_a_hard_restart(tmp_path):
     assert restored.cost_usd == Decimal("0.0209")
     assert len(await revived.list_attempts(task.task_id)) == 3
 
-    assert (await revived.get_task(parked.task_id)).status is TaskStatus.SUSPENDED
+    assert (await revived.get_task(parked.task_id)).status is TaskStatus.AWAITING_HUMAN
 
     # --- and the orphan is reclaimable ------------------------------------
     revived_life = TaskLifecycle(revived, clock=clock)
@@ -172,9 +172,9 @@ async def test_foundation_survives_a_hard_restart(tmp_path):
     assert [t.task_id for t in recovered] == [orphan.task_id]
     assert (await revived_life.start(orphan.task_id)).status is TaskStatus.RUNNING
 
-    # The suspended task still knows when to wake, across the whole ordeal.
-    due = await revived_life.due_for_resume(now=T0 + timedelta(minutes=5))
-    assert [t.task_id for t in due] == [parked.task_id]
+    # Only RUNNING is orphaned. The task waiting on a human was not being worked
+    # on by the dead process, so reclaiming it would be a lie about what happened.
+    assert parked.task_id not in [t.task_id for t in recovered]
 
     await revived.close()
 

@@ -30,7 +30,7 @@ import abc
 from enum import Enum
 from pathlib import Path
 
-from aop.core.schemas import Strict, TaskSpec, Verdict
+from certify.core.schemas import Strict, TaskSpec, Verdict
 
 
 class VerifierKind(str, Enum):

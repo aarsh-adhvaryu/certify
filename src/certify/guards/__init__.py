@@ -8,11 +8,11 @@ tool loop as a crash: it becomes a cheap tool message on the same tier with the
 cached prefix intact (see ``registry/toolcalls.py``), and it never escalates.
 """
 
-from aop.guards.budget import BudgetExceeded, BudgetGuard
-from aop.guards.commands import CommandGuard
-from aop.guards.denial import GuardDenied
-from aop.guards.discovery import DiscoveryScope, Found
-from aop.guards.pathjail import PathJail
+from certify.guards.budget import BudgetExceeded, BudgetGuard
+from certify.guards.commands import CommandGuard
+from certify.guards.denial import GuardDenied
+from certify.guards.discovery import DiscoveryScope, Found
+from certify.guards.pathjail import PathJail
 
 __all__ = [
     "BudgetExceeded",

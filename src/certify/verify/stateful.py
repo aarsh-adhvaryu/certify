@@ -25,10 +25,10 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
-from aop.backends.base import RunBackend
-from aop.core.config import VerifyPolicy
-from aop.core.schemas import Strict, Verdict
-from aop.verify.base import Verifier, VerifierKind, VerifyContext
+from certify.backends.base import RunBackend
+from certify.core.config import VerifyPolicy
+from certify.core.schemas import Strict, Verdict
+from certify.verify.base import Verifier, VerifierKind, VerifyContext
 
 Probe = Callable[[], bool | Awaitable[bool]]
 

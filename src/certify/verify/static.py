@@ -15,8 +15,8 @@ import ast
 import json
 from typing import Any
 
-from aop.core.schemas import Verdict
-from aop.verify.base import Verifier, VerifierKind, VerifyContext
+from certify.core.schemas import Verdict
+from certify.verify.base import Verifier, VerifierKind, VerifyContext
 
 
 class PythonSyntaxVerifier(Verifier):

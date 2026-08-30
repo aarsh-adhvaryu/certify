@@ -7,12 +7,12 @@ anywhere that runs commands.
 
 from __future__ import annotations
 
-from aop.backends.base import RunBackend, RunResult
-from aop.backends.windows import WindowsBackend
-from aop.backends.wsl import WslBackend
-from aop.core.config import PolicyConfig
-from aop.guards.commands import CommandGuard
-from aop.guards.pathjail import PathJail
+from certify.backends.base import RunBackend, RunResult
+from certify.backends.windows import WindowsBackend
+from certify.backends.wsl import WslBackend
+from certify.core.config import PolicyConfig
+from certify.guards.commands import CommandGuard
+from certify.guards.pathjail import PathJail
 
 
 class UnknownBackend(Exception):

@@ -40,8 +40,8 @@ from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
 
-from aop.guards.denial import GuardDenied
-from aop.guards.pathjail import reject_dangerous_syntax
+from certify.guards.denial import GuardDenied
+from certify.guards.pathjail import reject_dangerous_syntax
 
 GUARD = "discovery"
 

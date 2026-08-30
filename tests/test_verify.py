@@ -18,11 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from aop.backends import WindowsBackend
-from aop.core.config import VerifyPolicy
-from aop.core.schemas import FailureClass, VerdictStatus
-from aop.guards import CommandGuard, GuardDenied, PathJail
-from aop.verify import (
+from certify.backends import WindowsBackend
+from certify.core.config import VerifyPolicy
+from certify.core.schemas import FailureClass, VerdictStatus
+from certify.guards import CommandGuard, GuardDenied, PathJail
+from certify.verify import (
     CommandVerifier,
     JsonVerifier,
     PortVerifier,
@@ -95,7 +95,7 @@ class _Stub(Verifier):
 
     async def verify(self, ctx):
         self.ran = True
-        from aop.core.schemas import Verdict
+        from certify.core.schemas import Verdict
 
         return self._verdict or Verdict.passed(self.name)
 
@@ -110,7 +110,7 @@ async def test_gate_passes_when_every_verifier_passes(workspace):
 async def test_gate_stops_at_the_first_failure(workspace):
     """The reason goes verbatim into the retry; a wall of downstream errors from
     one broken file is worse input than the single root cause."""
-    from aop.core.schemas import Verdict
+    from certify.core.schemas import Verdict
 
     first = _Stub("a", verdict=Verdict.failed("a", reason="broken"))
     second = _Stub("b")

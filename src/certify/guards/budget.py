@@ -23,11 +23,11 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from aop.core.config import BudgetPolicy
-from aop.core.events import BudgetEvent, EventBus
-from aop.core.ids import Clock, SystemClock
-from aop.core.schemas import FailureClass
-from aop.core.state import StateStore
+from certify.core.config import BudgetPolicy
+from certify.core.events import BudgetEvent, EventBus
+from certify.core.ids import Clock, SystemClock
+from certify.core.schemas import FailureClass
+from certify.core.state import StateStore
 
 
 class BudgetExceeded(Exception):

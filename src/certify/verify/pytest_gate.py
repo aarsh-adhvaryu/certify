@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import re
 
-from aop.backends.base import RunBackend, RunResult
-from aop.core.schemas import Verdict
-from aop.verify.base import Verifier, VerifierKind, VerifyContext
+from certify.backends.base import RunBackend, RunResult
+from certify.core.schemas import Verdict
+from certify.verify.base import Verifier, VerifierKind, VerifyContext
 
 #: pytest's own exit codes.
 EXIT_OK = 0

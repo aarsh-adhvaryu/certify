@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from aop.core.events import (
+from certify.core.events import (
     AttemptFinished,
     EventBus,
     EventKind,
@@ -21,8 +21,8 @@ from aop.core.events import (
     TaskStatusChanged,
     TokenEmitted,
 )
-from aop.core.ids import FrozenClock, SequentialIds
-from aop.core.schemas import FailureClass, Role, TaskStatus, VerdictStatus
+from certify.core.ids import FrozenClock, SequentialIds
+from certify.core.schemas import FailureClass, Role, TaskStatus, VerdictStatus
 
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 

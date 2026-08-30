@@ -1,30 +1,29 @@
-"""Slot 06 — task lifecycle.
+"""Task lifecycle — what state a session is in, and which moves are legal.
 
 Transitions are explicit and validated. An illegal one raises rather than being
-tolerated, because the states here have consequences: SUSPENDED means nothing is
-spending money, HALTED means a budget ceiling fired, AWAITING_HUMAN means the
-system has run out of things it can verify on its own.
+tolerated, because the states have consequences: HALTED means a ceiling fired,
+AWAITING_HUMAN means certify has run out of things it can check on its own,
+which is where a refused directive lands.
 
-Two behaviours matter more than the bookkeeping:
+**Crash recovery is not optional.** Any task still marked RUNNING at startup
+belongs to a process that no longer exists, and is returned to PENDING.
 
-**Suspension is free.** When a stateful verifier is going to take a while, the
-task is written to SQLite and dropped. No model is parked waiting, no context is
-held. Resuming rebuilds from durable state, so a suspension that outlives the
-process costs nothing extra.
-
-**Crash recovery is not optional.** A daemon that runs for days will be killed
-mid-task eventually. On startup, any task still marked RUNNING belongs to a
-process that no longer exists, and is returned to PENDING to be picked up again.
+Suspension went in slot 0.3. It parked a task in SQLite while a slow stateful
+check polled, so no model sat holding context — but nothing woke it up once the
+scheduler was deleted, and a state that can be entered and never left is worse
+than one that does not exist. TaskStatus.SUSPENDED and the two durable columns
+behind it are still in the schema; E.1 rewrites that record and removes them,
+rather than spending a migration now on a shape E.1 will change again.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from aop.core.events import EventBus, TaskCreated, TaskStatusChanged
-from aop.core.ids import Clock, SystemClock
-from aop.core.schemas import FailureClass, Task, TaskStatus
-from aop.core.state import StateStore
+from certify.core.events import EventBus, TaskCreated, TaskStatusChanged
+from certify.core.ids import Clock, SystemClock
+from certify.core.schemas import FailureClass, Task, TaskStatus
+from certify.core.state import StateStore
 
 #: Legal transitions. Anything not listed is a bug in the caller, not a state to
 #: be silently coerced into something plausible.
@@ -34,21 +33,12 @@ ALLOWED: dict[TaskStatus, frozenset[TaskStatus]] = {
     ),
     TaskStatus.RUNNING: frozenset(
         {
-            TaskStatus.SUSPENDED,
             TaskStatus.AWAITING_HUMAN,
             TaskStatus.DONE,
             TaskStatus.FAILED,
             TaskStatus.HALTED,
             # Orphan recovery after a crash.
             TaskStatus.PENDING,
-        }
-    ),
-    TaskStatus.SUSPENDED: frozenset(
-        {
-            TaskStatus.RUNNING,
-            TaskStatus.AWAITING_HUMAN,
-            TaskStatus.FAILED,
-            TaskStatus.HALTED,
         }
     ),
     TaskStatus.AWAITING_HUMAN: frozenset(
@@ -103,7 +93,6 @@ class TaskLifecycle:
         target: TaskStatus,
         *,
         reason: str | None = None,
-        resume_after: datetime | None = None,
         note: str | None = None,
     ) -> Task:
         task = await self._store.get_task(task_id)
@@ -112,15 +101,6 @@ class TaskLifecycle:
 
         previous = task.status
         updates: dict[str, object] = {"status": target}
-
-        if target is TaskStatus.SUSPENDED:
-            updates["suspended_reason"] = reason
-            updates["resume_after"] = resume_after
-        elif previous is TaskStatus.SUSPENDED:
-            # Clear the parking details on the way out so a later suspension
-            # cannot inherit a stale wake-up time.
-            updates["suspended_reason"] = None
-            updates["resume_after"] = None
 
         if note is not None:
             updates["note"] = note
@@ -137,29 +117,6 @@ class TaskLifecycle:
         return saved
 
     async def start(self, task_id: str) -> Task:
-        return await self._transition(task_id, TaskStatus.RUNNING)
-
-    async def suspend(
-        self,
-        task_id: str,
-        reason: str,
-        *,
-        resume_after: datetime | None = None,
-        wait: timedelta | None = None,
-    ) -> Task:
-        """Park a task on something slow.
-
-        Everything needed to carry on is already in SQLite, so the in-memory side
-        can be dropped entirely — that is what makes a long stateful check cost
-        nothing while it runs.
-        """
-        if resume_after is None and wait is not None:
-            resume_after = self._clock.now() + wait
-        return await self._transition(
-            task_id, TaskStatus.SUSPENDED, reason=reason, resume_after=resume_after
-        )
-
-    async def resume(self, task_id: str) -> Task:
         return await self._transition(task_id, TaskStatus.RUNNING)
 
     async def await_human(self, task_id: str, reason: str) -> Task:
@@ -208,25 +165,11 @@ class TaskLifecycle:
     async def pending(self, now: datetime | None = None) -> list[Task]:
         """Tasks waiting to be picked up, oldest first.
 
-        The counterpart to :meth:`due_for_resume`. Both exist so the scheduler
-        reads *what should run*, rather than inferring it from statuses at the
-        call site — a query that gets subtly re-derived in three places is a
-        query that will disagree with itself in one of them.
+        Exists so callers read *what should run* rather than inferring it from
+        statuses at the call site — a query that gets subtly re-derived in three
+        places is a query that will disagree with itself in one of them.
         """
         return await self._store.list_tasks(status=TaskStatus.PENDING)
-
-    async def due_for_resume(self, now: datetime | None = None) -> list[Task]:
-        """Suspended tasks whose wake-up time has passed.
-
-        A suspended task with no ``resume_after`` is waiting on an external
-        signal rather than a clock, and is never returned here.
-        """
-        now = now or self._clock.now()
-        return [
-            task
-            for task in await self._store.list_tasks(status=TaskStatus.SUSPENDED)
-            if task.resume_after is not None and task.resume_after <= now
-        ]
 
     async def recover_orphans(self) -> list[Task]:
         """Reclaim tasks abandoned by a crashed process.

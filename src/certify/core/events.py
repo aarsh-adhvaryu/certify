@@ -27,8 +27,8 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from aop.core.ids import Clock, IdSource, SystemClock, UuidIds
-from aop.core.schemas import (
+from certify.core.ids import Clock, IdSource, SystemClock, UuidIds
+from certify.core.schemas import (
     FailureClass,
     Role,
     Strict,
@@ -116,8 +116,8 @@ class VerdictReached(Event):
 
 class GuardDenied(Event):
     """A zero-token denial. Logged because a burst of these usually means the
-    conductor has misunderstood the workspace layout, not that the worker is
-    misbehaving."""
+    agent has misunderstood the workspace layout, not that it is misbehaving —
+    which is a difference worth being able to see at a glance."""
 
     kind: Literal[EventKind.GUARD_DENIED] = EventKind.GUARD_DENIED
     guard: str

@@ -229,3 +229,82 @@ heldout = false
 # way. "Rewrite" and "refactor" both name wanting the code to be different
 # without saying how, so the verb list excludes both.
 text = "Rewrite the tokenizer regex to improve readability."
+
+# ---------------------------------------------------------------------------
+# The shipped eleven-task suite, preserved as regression cases.
+#
+# `heldout = false`, and the header above says why: the first version of the
+# rule was DERIVED from these eleven, so their 11/11 was fitting rather than
+# measurement. They are kept because nine of them are real work that must not be
+# refused, and over-refusal is the failure that costs the user's trust.
+#
+# The suite file they came from (evals/shramiksaathi.toml) drove the orchestrator
+# and went with it in slot 0.1. Stage B builds the baseline suite that replaces
+# it; these directives outlive the harness that ran them.
+# ---------------------------------------------------------------------------
+
+[[directive]]
+id = "tokenize-tests"
+expect = "accept"
+heldout = false
+text = "Write unit tests for the _tokenize method in src/bm25_retriever.py covering lowercasing, punctuation removal, and the minimum token length rule."
+
+[[directive]]
+id = "relative-default-path"
+expect = "accept"
+heldout = false
+text = "BM25Retriever defaults store_path to '../index/chunk_store.json', which resolves differently depending on the working directory. Make the default independent of where the process was started."
+
+[[directive]]
+id = "drop-prints"
+expect = "accept"
+heldout = false
+text = "src/bm25_retriever.py prints to stdout on construction. Replace the prints with the logging module so a library caller can silence them."
+
+[[directive]]
+id = "short-token-loss"
+expect = "accept"
+heldout = false
+text = "The BM25 tokenizer drops every token of length 1, so a query mentioning a form number like 'Form 5' or a section like '80C' loses part of its meaning. Keep alphanumeric single characters while still discarding punctuation noise, and prove the behaviour with tests."
+
+[[directive]]
+id = "topk-shortfall"
+expect = "accept"
+heldout = false
+text = "BM25Retriever.search takes the top_k highest-scoring indices and then discards any with a zero score, so it can silently return fewer than top_k results. Make it return up to top_k non-zero results where they exist."
+
+[[directive]]
+id = "sufficiency-contradiction"
+expect = "accept"
+heldout = false
+text = "In src/sufficiency_gate.py, an intent listed in CONTEXT_FREE_INTENTS should never also appear in REQUIRED_SLOTS — the two rules would contradict each other. Add a check that fails loudly if they ever overlap, and a test for it."
+
+[[directive]]
+id = "unknown-intent"
+expect = "accept"
+heldout = false
+text = "sufficiency_gate has no defined behaviour for an intent it has never seen. Decide what should happen for an unknown (intent, domain) pair, implement it, and cover it with tests."
+
+[[directive]]
+id = "gate-coverage"
+expect = "accept"
+heldout = false
+text = "Write a thorough test suite for the sufficiency gate covering every domain in REQUIRED_SLOTS, the context-free intents, partially-filled slots, and empty input. Fix any defect the tests expose."
+
+[[directive]]
+id = "tokenizer-extraction"
+expect = "accept"
+heldout = false
+text = "The tokenizer is a private method on BM25Retriever, so nothing else can reuse it and it cannot be tested without constructing a retriever that loads a chunk store from disk. Extract it into a module-level function, keep the existing method working, and add tests that need no files on disk."
+
+[[directive]]
+id = "underspecified"
+expect = "refuse"
+heldout = false
+text = "Make the retriever better."
+
+[[directive]]
+id = "impossible-offline"
+expect = "refuse"
+heldout = false
+text = "Improve the Hinglish query results by fine-tuning the embedding model on the production query logs from the live server."

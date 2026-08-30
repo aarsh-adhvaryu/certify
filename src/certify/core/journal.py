@@ -16,13 +16,13 @@ It earns its place four times over:
 * **A window.** A human can open one file and see what the daemon thinks is
   happening, without a UI, a query, or a running process.
 * **Bootstrap context.** It is a plain document, so it can be handed to *any*
-  model — a fresh conductor, a different vendor, a chat window — when something
+  model — a different agent, a different vendor, a chat window — when something
   needs to be picked up cold.
 * **A steering seam.** It is human-editable. Correct the state block and the
   orchestrator reads the correction back.
 
 The file has two halves. The prose is for people and is regenerated wholesale on
-every write. The fenced ``aop-state`` block is the authority — machine-written,
+every write. The fenced ``certify-state`` block is the authority — machine-written,
 machine-read, and the only part that survives a round trip. Recovery parses the
 fence rather than the prose, because a parser that reverse-engineers English is
 the sort of thing that works in a test and fails in reality.
@@ -37,13 +37,13 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from aop.core.events import EventBus, JournalWritten
-from aop.core.ids import Clock, SystemClock
-from aop.core.schemas import Attempt, Strict, Task, TaskStatus
-from aop.core.state import StateStore
+from certify.core.events import EventBus, JournalWritten
+from certify.core.ids import Clock, SystemClock
+from certify.core.schemas import Attempt, Strict, Task, TaskStatus
+from certify.core.state import StateStore
 
 JOURNAL_VERSION = 1
-FENCE_TAG = "aop-state"
+FENCE_TAG = "certify-state"
 
 _FENCE = re.compile(
     r"^```" + re.escape(FENCE_TAG) + r"\s*\n(?P<body>.*?)^```\s*$",

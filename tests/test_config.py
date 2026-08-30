@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from aop.core.config import (
+from certify.core.config import (
     ConfigError,
     PolicyConfig,
     load_policy,
@@ -88,7 +88,6 @@ def test_jail_root_resolves_against_project_root(tmp_path):
 
 def test_policy_defaults_are_the_documented_ones():
     policy = PolicyConfig()
-    assert policy.ladder.retries_before_escalation == 1
     assert policy.verify.suspend_threshold_seconds == 2.0
     assert policy.jail.root == "workspace"
 

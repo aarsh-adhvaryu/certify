@@ -31,7 +31,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path, PureWindowsPath
 
-from aop.guards.denial import GuardDenied
+from certify.guards.denial import GuardDenied
 
 GUARD = "pathjail"
 

@@ -36,12 +36,6 @@ max_results = 200
 backend = "windows"
 command_timeout_seconds = 300.0
 
-[ladder]
-# Retry once with the failure reason appended, then stop. The cap is what makes
-# a doomed task terminate rather than loop.
-retries_before_escalation = 1
-max_attempts = 4
-
 [budget]
 # Deterministic ceilings, checked BEFORE dispatch. Prompt discipline is not a
 # mechanism.

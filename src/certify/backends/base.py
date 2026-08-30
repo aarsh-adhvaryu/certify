@@ -21,9 +21,9 @@ import abc
 from collections.abc import Sequence
 from pathlib import Path
 
-from aop.core.schemas import Strict
-from aop.guards.commands import CommandGuard
-from aop.guards.pathjail import PathJail
+from certify.core.schemas import Strict
+from certify.guards.commands import CommandGuard
+from certify.guards.pathjail import PathJail
 
 
 class RunResult(Strict):

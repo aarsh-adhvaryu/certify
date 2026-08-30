@@ -11,9 +11,9 @@ from decimal import Decimal
 
 import pytest
 
-from aop.core.events import EventBus, EventKind
-from aop.core.ids import FrozenClock, SequentialIds
-from aop.core.journal import (
+from certify.core.events import EventBus, EventKind
+from certify.core.ids import FrozenClock, SequentialIds
+from certify.core.journal import (
     FENCE_TAG,
     JOURNAL_VERSION,
     Journal,
@@ -22,8 +22,8 @@ from aop.core.journal import (
     render,
     snapshot_state,
 )
-from aop.core.lifecycle import TaskLifecycle
-from aop.core.schemas import (
+from certify.core.lifecycle import TaskLifecycle
+from certify.core.schemas import (
     Attempt,
     FailureClass,
     Role,
@@ -31,7 +31,7 @@ from aop.core.schemas import (
     TaskStatus,
     VerdictStatus,
 )
-from aop.core.state import StateStore
+from certify.core.state import StateStore
 
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -334,19 +334,6 @@ async def test_awaiting_human_tasks_get_their_own_section(env):
     assert task.task_id in text
     # The open question itself, not just that something is waiting.
     assert "no verifier for a pricing judgement" in text
-
-
-async def test_suspended_task_shows_its_wake_time(env):
-    store, journal, _, _, _ = env
-    life = TaskLifecycle(store, clock=_clock())
-    task = await life.create("wait for the server")
-    await life.start(task.task_id)
-    await life.suspend(task.task_id, "waiting on port 8080", wait=timedelta(seconds=30))
-    await journal.write()
-
-    text = journal.path.read_text(encoding="utf-8")
-    assert "waiting on port 8080" in text
-    assert "resume after" in text
 
 
 async def test_table_cells_cannot_break_the_markdown(env):

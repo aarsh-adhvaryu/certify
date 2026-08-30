@@ -30,8 +30,8 @@ from typing import Any
 
 import aiosqlite
 
-from aop.core.ids import Clock, IdSource, SystemClock, UuidIds
-from aop.core.schemas import (
+from certify.core.ids import Clock, IdSource, SystemClock, UuidIds
+from certify.core.schemas import (
     Attempt,
     FailureClass,
     Role,
@@ -698,7 +698,7 @@ class StateStore:
         return sum((Decimal(r["cost_usd"]) for r in rows), Decimal("0"))
 
     async def task_spend(self, task_id: str, *, billable_only: bool = True) -> Decimal:
-        """What this task has cost, including the conductor.
+        """What this task has cost, across every purpose and not just the work.
 
         Reads the spend ledger rather than the attempt rows. Summing attempts
         counted only execution and left planning and test authorship outside the

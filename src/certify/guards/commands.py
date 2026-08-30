@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Sequence
 
-from aop.guards.denial import GuardDenied
+from certify.guards.denial import GuardDenied
 
 GUARD = "commands"
 

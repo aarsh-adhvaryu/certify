@@ -2,8 +2,9 @@
 
 Every record that crosses a plane boundary or lands in durable storage is
 defined here, and every one of them pins ``schema_version``. The task spec is
-the conductor-to-worker contract and it will change; without a pinned version, a
-format change silently corrupts the router's training set.
+the contract between what was asked and what is graded, and it will change;
+without a pinned version, a format change silently corrupts every record already
+written under the old shape.
 
 Models forbid extra fields. A typo in a field name should fail at construction,
 not quietly vanish into a dict that nothing reads.
@@ -36,15 +37,21 @@ class Strict(BaseModel):
 
 
 class Role(str, Enum):
-    """Role slots. Code references these; never a model name (spec §3.1)."""
+    """Who spent something, for the ledger's `role` column.
+
+    These four are the model tiers of a system that no longer exists, and they
+    describe nothing certify does. They are left in place deliberately: E.5 is
+    the slot that builds the ledger line, and that is when it will be clear what
+    this column should actually record — or whether it should exist at all.
+    Guessing a replacement now would cost a migration to undo.
+
+    Code references role slots, never a model name.
+    """
 
     CONDUCTOR = "conductor"
     LOW = "low"
     HIGH = "high"
     MAX = "max"
-
-
-#: Execution tiers in escalation order. The conductor is not an execution tier.
 # --------------------------------------------------------------------------
 # Failure taxonomy
 # --------------------------------------------------------------------------
@@ -173,15 +180,20 @@ class Verdict(Strict):
 
 
 # --------------------------------------------------------------------------
-# Task spec — the conductor-to-worker contract
+# Task spec — what was asked, in the shape the gate can check
 # --------------------------------------------------------------------------
 
 
 class TaskSpec(Strict):
-    """A structured spec, deliberately not a reworded prompt (spec §7).
+    """A structured spec, deliberately not a reworded prompt.
 
-    The conductor filling fields is a much narrower channel than the conductor
-    rewriting prose, which is the whole anti-drift argument.
+    Filling named fields is a much narrower channel than rewriting prose, which
+    is the whole anti-drift argument: a restatement can quietly become a
+    different task, a field cannot.
+
+    ``acceptance`` is the load-bearing one. An empty list does not make the gate
+    vague — it disables the separation that makes the gate mean anything, while
+    still reporting a pass. ``refusal.check_plan`` refuses it rather than warning.
     """
 
     schema_version: int = TASK_SPEC_SCHEMA_VERSION
@@ -316,8 +328,8 @@ class Task(Strict):
     """A unit of work with an immutable directive.
 
     ``directive`` is the user's raw original intent, verbatim. It is hashed at
-    creation and re-checked at every checkpoint (Slot 33): the conductor re-plans
-    freely, but it does not get to quietly restate what you asked for.
+    creation and re-checked before anything is graded: work proceeds freely, but
+    nothing gets to quietly restate what you asked for.
     """
 
     task_id: str

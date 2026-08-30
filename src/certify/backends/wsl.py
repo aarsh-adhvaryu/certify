@@ -30,10 +30,10 @@ import time
 from collections.abc import Sequence
 from pathlib import Path, PureWindowsPath
 
-from aop.backends.base import RunBackend, RunResult
-from aop.guards.commands import CommandGuard
-from aop.guards.denial import GuardDenied
-from aop.guards.pathjail import PathJail
+from certify.backends.base import RunBackend, RunResult
+from certify.guards.commands import CommandGuard
+from certify.guards.denial import GuardDenied
+from certify.guards.pathjail import PathJail
 
 _MNT = re.compile(r"^/mnt/([a-z])(/.*)?$", re.IGNORECASE)
 

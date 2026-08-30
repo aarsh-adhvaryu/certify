@@ -1,8 +1,13 @@
-"""Slots 16, 17, 18, 21 — the guard layer.
+"""The guard layer — path jail, command allowlist, budget ceiling.
 
-Every guard here is deterministic and zero-token. The tests that matter most are
-the ones proving a guard trip cannot escalate a tier or write a training label,
-and the jail-escape suite.
+Every guard here is deterministic and zero-token. No guard makes a model call,
+ever: a guard that costs tokens is not a guard, it is a second opinion, and it
+can be talked out of its answer.
+
+The jail-escape suite is the part that matters most. On Windows it tests link
+escapes with a junction rather than a symlink, because symlink_to needs
+SeCreateSymbolicLinkPrivilege and skipping on the platform this mostly runs on
+would skip the escape that matters.
 """
 
 from __future__ import annotations
@@ -14,104 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from aop.core.config import BudgetPolicy, LadderPolicy
-from aop.core.events import EventBus, EventKind
-from aop.core.failures import Action, decide
-from aop.core.ids import FrozenClock, SequentialIds
-from aop.core.schemas import Attempt, FailureClass, Role, VerdictStatus
-from aop.core.state import StateStore
-from aop.guards import BudgetExceeded, BudgetGuard, CommandGuard, GuardDenied, PathJail
+from certify.core.config import BudgetPolicy
+from certify.core.events import EventBus, EventKind
+from certify.core.ids import FrozenClock, SequentialIds
+from certify.core.schemas import Attempt, FailureClass, Role, VerdictStatus
+from certify.core.state import StateStore
+from certify.guards import BudgetExceeded, BudgetGuard, CommandGuard, GuardDenied, PathJail
 
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-LADDER = LadderPolicy(retries_before_escalation=1, max_attempts=4)
-
-
-# ==================================== Slot 16 — what a failure may cause
-
-
-def _decide(fc, *, total=1, at_tier=1, next_role=Role.HIGH, policy=LADDER):
-    return decide(
-        failure_class=fc,
-        attempts_total=total,
-        verifier_failures_at_tier=at_tier,
-        policy=policy,
-        next_role=next_role,
-    )
-
-
-def test_success_proceeds():
-    d = _decide(FailureClass.NONE)
-    assert d.action is Action.PROCEED
-    assert d.trains_router
-
-
-def test_first_verifier_failure_retries_at_the_same_tier():
-    """Catches format and transient failures cheaply, with the cached prefix
-    still valid."""
-    d = _decide(FailureClass.VERIFIER, at_tier=1)
-    assert d.action is Action.RETRY_SAME_TIER
-
-
-def test_second_verifier_failure_escalates():
-    d = _decide(FailureClass.VERIFIER, total=2, at_tier=2)
-    assert d.action is Action.ESCALATE
-    assert d.next_role is Role.HIGH
-    assert d.trains_router
-
-
-def test_verifier_failure_at_the_top_hands_to_a_human():
-    d = _decide(FailureClass.VERIFIER, total=2, at_tier=2, next_role=None)
-    assert d.action is Action.HAND_TO_HUMAN
-
-
-@pytest.mark.parametrize("fc", [FailureClass.GUARD, FailureClass.TRANSPORT])
-def test_guard_and_transport_never_escalate(fc):
-    """A path typo must not buy a more expensive model."""
-    for at_tier in range(1, 6):
-        d = _decide(fc, at_tier=at_tier)
-        assert d.action is Action.RETRY_SAME_TIER
-        assert d.next_role is None
-
-
-@pytest.mark.parametrize("fc", [FailureClass.GUARD, FailureClass.TRANSPORT])
-def test_guard_and_transport_never_train_the_router(fc):
-    assert not _decide(fc).trains_router
-
-
-def test_guard_trips_still_count_toward_the_cap():
-    """Without this a worker looping on jail escapes would never terminate."""
-    d = _decide(FailureClass.GUARD, total=4)
-    assert d.action is Action.HAND_TO_HUMAN
-    assert "cap reached" in d.reason
-
-
-def test_the_cap_stops_a_doomed_task():
-    d = _decide(FailureClass.VERIFIER, total=4, at_tier=1)
-    assert d.action is Action.HAND_TO_HUMAN
-
-
-def test_budget_halts_rather_than_retrying():
-    """Retrying is precisely the thing that would make it worse."""
-    d = _decide(FailureClass.BUDGET)
-    assert d.action is Action.HALT
-    assert not d.trains_router
-
-
-def test_budget_halt_outranks_the_attempt_cap():
-    assert _decide(FailureClass.BUDGET, total=99).action is Action.HALT
-
-
-def test_retries_before_escalation_is_configurable():
-    patient = LadderPolicy(retries_before_escalation=2, max_attempts=6)
-    assert _decide(FailureClass.VERIFIER, at_tier=2, policy=patient).action is Action.RETRY_SAME_TIER
-    assert _decide(FailureClass.VERIFIER, at_tier=3, policy=patient).action is Action.ESCALATE
-
-
-def test_zero_retries_escalates_immediately():
-    eager = LadderPolicy(retries_before_escalation=0, max_attempts=4)
-    assert _decide(FailureClass.VERIFIER, at_tier=1, policy=eager).action is Action.ESCALATE
-
-
 # ============================================= Slot 17 — the path jail
 
 

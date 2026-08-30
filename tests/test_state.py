@@ -11,8 +11,8 @@ from decimal import Decimal
 
 import pytest
 
-from aop.core.ids import FrozenClock, SequentialIds
-from aop.core.schemas import (
+from certify.core.ids import FrozenClock, SequentialIds
+from certify.core.schemas import (
     Attempt,
     FailureClass,
     Role,
@@ -21,7 +21,7 @@ from aop.core.schemas import (
     VerdictStatus,
     hash_directive,
 )
-from aop.core.state import SCHEMA_VERSION, StateStore, TaskNotFound
+from certify.core.state import SCHEMA_VERSION, StateStore, TaskNotFound
 
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -308,7 +308,7 @@ async def test_daily_spend_is_scoped_to_the_day(store):
 async def test_naive_timestamps_are_refused_at_the_boundary(store):
     """Attempt validation blocks these already; the store refuses them too, so
     no path can slip a timezone-less value into durable state."""
-    from aop.core.state import _dt_out
+    from certify.core.state import _dt_out
 
     with pytest.raises(ValueError, match="naive"):
         _dt_out(datetime(2026, 1, 1, 12, 0, 0))
