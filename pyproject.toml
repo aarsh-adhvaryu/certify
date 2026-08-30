@@ -1,41 +1,50 @@
 [project]
 name = "certify"
 version = "0.1.0"
-description = "A deterministic verification layer for coding agents: guards, a frozen-test gate, and a spend ledger. Zero tokens of its own."
+description = "Stop your coding agent grading its own homework. A deterministic verification layer: refuses unfalsifiable work, freezes the criteria before implementation, and calls no model to do it."
+readme = "README.md"
 requires-python = ">=3.11"
-# The core is deliberately small: the guards, the gate and the ledger are pure
-# Python and call no model. Everything that needs a network stack is an extra.
+authors = [{ name = "Aarsh Adhvaryu" }]
+keywords = [
+    "coding-agent",
+    "verification",
+    "llm",
+    "static-analysis",
+    "ci",
+    "claude-code",
+    "guardrails",
+]
+
+# Two packages. That is the point, not an accident.
+#
+# Everything that decides whether work is acceptable calls no model, so there is
+# no HTTP client, no provider SDK and no API key anywhere in the core. httpx was
+# a dependency until slot 0.2, when the model layer that needed it was removed;
+# nothing has imported it since.
 dependencies = [
     "pydantic>=2.7",
     "aiosqlite>=0.20",
-    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-# The local HTTP + WebSocket surface (`certify serve`), for a browser view or a
-# host wrapper to subscribe to. Not needed to verify anything.
-#
-# `websockets` belongs here as a HARD requirement of this extra, not a nicety:
-# uvicorn disables WebSocket support entirely when no WS library is present at
-# startup and answers /ws with a 404, so a subscriber connects, fails silently,
-# and shows a dead status dot forever.
-service = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    "websockets>=12",
-]
-
-# The Claude Code execution plane (Slot 48b). Optional because the internal
-# plane must keep working without it — and because a graded eval that silently
-# fell back to the other plane would be a wrong answer, not a degraded one.
-claude = [
-    "claude-agent-sdk>=0.1",
-]
-
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
+
+# Deliberately absent, and worth stating so they are not re-added by reflex:
+#
+#   service — the local HTTP + WebSocket surface. Deleted in slot 0.1; Stage I
+#             rebuilds it as a client of state that never imports the core.
+#   claude  — the Claude Agent SDK. hosts/claude_code.py builds a hook payload as
+#             a plain dict and does not import the SDK to do it. Stage E.3 wires
+#             it to a real host, and that is when the extra earns its place.
+#   graph   — `graphifyy`, for Stage F. Reading graph.json needs no dependency at
+#             all; the extra will exist only to *produce* one.
+
+[project.urls]
+Repository = "https://github.com/aarsh-adhvaryu/certify"
+Issues = "https://github.com/aarsh-adhvaryu/certify/issues"
 
 [build-system]
 requires = ["setuptools>=68"]

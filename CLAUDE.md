@@ -36,6 +36,11 @@ async tests need no decorator. `pip install -e .` removes the PYTHONPATH line.
 A.1. Anything describing `certify begin` or `certify verify` is describing the
 plan, not the code.
 
+**There is no licence, by decision.** Deferred until near the end, which means the
+repository is all-rights-reserved and nobody may legally use it. This blocks A.7
+(PyPI) and every adoption claim. `README.md` says so plainly; do not let it drift
+into being unstated.
+
 ---
 
 ## What exists

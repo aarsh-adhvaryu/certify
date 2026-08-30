@@ -371,9 +371,17 @@ describes a CLI that no longer exists.
 
 Cross-platform from day one. A single-platform package gets zero adoption.
 
-- **A.1 — Name and identity.** Rename, pyproject metadata, licence. Add
-  `[project.scripts]` — there is none today, so `aop` has never been a real
-  binary, only `python -m aop`.
+- **A.1 — Name and identity.** ◑ Partly done out of order: the rename, the
+  pyproject metadata and `README.md` landed early so the repository identifies
+  itself. What remains is `[project.scripts]` — there is still no `certify`
+  binary, only an importable package.
+  **⚠️ LICENCE IS DEFERRED BY DECISION, AND MUST BE SETTLED BEFORE ANY PUBLIC
+  RELEASE.** Until one exists the repository is all-rights-reserved, so nobody
+  may legally use it — which makes it a blocker for A.7 (PyPI) and for every
+  adoption claim in section 11. The candidates and their trade-offs were costed:
+  Apache-2.0 (patent grant, matches Graphify's neighbourhood), MIT (shortest),
+  or dual Apache-2.0/MIT (exactly what Graphify does). `README.md` states the
+  absence plainly rather than leaving it ambiguous.
 - **A.2 — Portable runner.** One `run/` module replacing `backends/`. Preserve the
   Windows lesson: `CreateProcess` searches the *calling* process's PATH, not the
   environment block you pass, so the runner resolves the program itself. And
