@@ -22,10 +22,19 @@ the *motivation* for a concrete deliverable. That is why the check fires on an
 evaluative term with **nothing anywhere to check it against**, never on the term
 alone, and why it is policy rather than a constant.
 
-That first rule separated the shipped suite 11/11 and then scored 12/20 on
-twenty directives written before it existed. The replacement scores 20/20 on the
-same held-out set, and that number means something only because the first rule
-died on it. See ``evals/holdout-directives.toml``.
+That first rule separated the shipped suite 11/11 and then scored **12/20** on
+twenty directives written before it existed. That 12/20 was real evidence, and it
+is what killed the rule.
+
+**The replacement has no comparable number, and this docstring is not allowed to
+imply otherwise.** It scored 20/20 on the same twenty — but those twenty were
+re-scored again in slot 0.3, during a rename, to confirm nothing had broken.
+Reasonable, and fatal: you do not have to train on a set to spend it, and from
+that point the 20 are a set the code has been steered by.
+
+`evals/directives/development.toml` holds them, relabelled honestly.
+`evals/directives/blind.toml` is where the next real number comes from, and it is
+empty until somebody who has not read this file fills it.
 """
 from __future__ import annotations
 

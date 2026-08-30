@@ -1,0 +1,91 @@
+# Blind directives — the only file in this repository that can produce evidence.
+#
+# EMPTY BY DESIGN. It stays empty until someone who has not read
+# `src/certify/refusal.py` fills it. An empty blind set is honest; a blind set
+# written by the person who wrote the rule is not, whatever the header says.
+#
+# ---------------------------------------------------------------------------
+# THE PROTOCOL
+# ---------------------------------------------------------------------------
+#
+# 1. THE AUTHOR HAS NOT READ THE RULE.
+#    Not "tried not to think about it" — has not read `refusal.py`, and has not
+#    read `evals/directives/development.toml` either, because the development
+#    set telegraphs the rule's shape through its adversarial cases.
+#
+#    Workable sources, in rough order of quality:
+#      * Real asks. Issue titles, commit messages, Slack requests, your own
+#        shell history. Best, because their distribution is the real one.
+#      * A second person given the labelling question below and nothing else.
+#      * A model given the labelling question and no access to this repository.
+#        Weakest — a model may have absorbed similar reasoning — but far better
+#        than the rule's own author writing them.
+#
+# 2. LABEL BY THE QUESTION, NOT BY THE RULE.
+#    Could a competent engineer, given the workspace and nothing else, write a
+#    pass/fail test from this directive alone?
+#      expect = "accept"  -> yes
+#      expect = "refuse"  -> no; there is no fact of the matter about when it is done
+#
+#    If you catch yourself asking "would the gate catch this?", stop. That is
+#    the rule leaking in, and the case is now development data.
+#
+# 3. SIZE IT FOR THE ANSWER YOU NEED.
+#    Below ~30 cases, a two-case difference is noise. Aim for 40+, and keep the
+#    accept/refuse split near even — an imbalanced set lets a rule that always
+#    accepts look respectable.
+#
+#    Include the awkward shapes deliberately. Not because the rule struggles
+#    with them (you do not know that), but because real work contains them:
+#    concrete asks naming things that do not exist; vague asks naming things
+#    that do; evaluative words used as *motivation* for a concrete deliverable.
+#
+# 4. SEAL IT BEFORE SCORING.
+#    Set `sealed_at` to a UTC ISO-8601 timestamp and commit. `score()` refuses an
+#    unsealed set, because a case that can be edited after you see how it scored
+#    is fitting with extra steps.
+#
+# 5. IT IS SPENT AFTER ONE SCORE.
+#    `score()` writes `first_scored_at` into this file on first use. That number
+#    is the measurement. Every later run is a regression check, and `Score`
+#    carries `is_evidence = False` so it cannot be quoted as anything else.
+#
+#    Do not reset the field. If you need fresh evidence, write a new set —
+#    `blind-002.toml` — and keep this one as regression data.
+#
+# 6. WHEN IT IS SPENT, SAY SO OUT LOUD.
+#    Record the score in CLAUDE.md with its date, including the false-refusal
+#    count on its own. Refusing real work is the expensive error: a gate that
+#    accepts a vague directive produces something to argue with, one that
+#    rejects real work fails silently and gets uninstalled.
+#
+# ---------------------------------------------------------------------------
+#
+# WHY THIS FILE EXISTS AT ALL: the previous set was written before the rule and
+# was real evidence — it scored the first rule 12/20 and killed it. Then, during
+# a package rename, it was re-scored to check nothing had broken. Reasonable, and
+# fatal. You do not have to train on a set to spend it; consulting it is enough.
+
+version = 1
+kind = "blind"
+name = "blind-001"
+
+# Who wrote these and what they could see. Without this, the file is development
+# data whatever `kind` says.
+provenance = ""
+
+# UTC ISO-8601. Scoring is refused until this is set.
+sealed_at = ""
+
+# Written automatically on first score. DO NOT SET OR RESET BY HAND.
+first_scored_at = ""
+
+# ---------------------------------------------------------------------------
+# Cases go below. Shape:
+#
+#   [[directive]]
+#   id = "short-kebab-id"
+#   expect = "accept"
+#   text = "the directive, exactly as it would be typed"
+#   note = "optional: why this case is interesting"
+# ---------------------------------------------------------------------------

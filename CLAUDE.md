@@ -226,9 +226,15 @@ Most have a named test. Each was paid for.
 
 - **A rule scored on the cases it was derived from is fitted, not measured.** The
   first refusal rule separated the shipped suite 11/11 and scored **12/20** on
-  twenty directives written before it existed. `evals/holdout-directives.toml`
-  keeps both sets; `heldout = false` marks regression cases, which are not
-  evidence.
+  twenty directives written before it existed. **That set is now spent**: slot
+  0.3 re-scored it during a rename to check nothing had broken, which is
+  reasonable and burns it just the same. You do not have to train on a set to
+  spend it — consulting it is enough.
+  `evals/directives/development.toml` holds it, relabelled;
+  `evals/directives/blind.toml` is empty until someone who has not read
+  `refusal.py` fills it, and `certify.measure` enforces the difference in code
+  rather than in a comment: a blind set cannot be scored before it is sealed, and
+  is marked burnt in the file itself on first use.
 - **An outage is not a result.** A baseline once read 6/11 = 55%; four of the five
   "failures" were transport errors that had never been graded. The true figure
   was 6/7. Divide by **graded**, and refuse to compare runs that graded different

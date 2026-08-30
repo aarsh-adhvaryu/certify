@@ -4,10 +4,15 @@ These are the reason the project exists, and they would survive Graphify
 disappearing tomorrow: refusing a directive with no checkable success condition,
 and refusing a spec whose criteria list is empty.
 
-The 48e block below is the one that matters. Its held-out score is the only
-honest measurement of the rule, because the first version of it separated the
-shipped suite 11/11 and then scored 12/20 on twenty directives written before it
-existed. A rule scored on the cases it was derived from is fitted, not measured.
+⚠️ **Nothing in this file measures whether the rule generalises.** The 39-case
+development set was genuinely held out once and killed the first version of the
+rule at 12/20 — then slot 0.3 re-scored it during the package rename to check
+nothing had broken. Reasonable, and fatal: you do not have to train on a set to
+spend it. Consulting it is enough.
+
+These are regression tests. They tell you a change broke something. Evidence
+comes from `evals/directives/blind.toml`, which is empty until somebody who has
+not read `refusal.py` fills it — see the protocol in that file's header.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from certify.core.schemas import TaskSpec
+from certify.measure import load_directives
 from certify.refusal import check_plan, falsifiability
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -98,23 +104,22 @@ def test_low_vocabulary_overlap_warns_but_does_not_refuse():
 #     not restate the goal" would have refused most of the working suite
 
 
-def _directives(*, heldout: bool) -> list[tuple[str, str, str]]:
-    """Cases from the 48e directive file, as (id, text, expect).
+def _development_set():
+    """The 39 development directives. **Regression data, not evidence.**
 
-    The two groups are scored separately on purpose. The held-out twenty were
-    written before the rule existed and are the only honest measurement of it;
-    the rest were found by probing the working gate and then fixed, which makes
-    them regression cases rather than evidence.
+    Twenty of these were genuinely held out once — written before the rule, and
+    they killed its first version at 12/20. Then slot 0.3 re-scored them during
+    the package rename to confirm nothing had broken. Reasonable, and fatal: you
+    do not have to train on a set to spend it.
+
+    `evals/directives/blind.toml` is where evidence will come from, and it is
+    empty until somebody who has not read `refusal.py` fills it.
     """
-    import tomllib
+    return load_directives(PROJECT / "evals" / "directives" / "development.toml")
 
-    path = PROJECT / "evals" / "holdout-directives.toml"
-    payload = tomllib.loads(path.read_text(encoding="utf-8"))
-    return [
-        (d["id"], d["text"], d["expect"])
-        for d in payload["directive"]
-        if d.get("heldout", True) is heldout
-    ]
+
+def _refuses(text: str) -> bool:
+    return not check_plan(text, _spec()).ok
 
 
 def test_the_directive_that_started_this_is_refused():
@@ -167,56 +172,38 @@ def test_the_check_can_be_turned_off():
                       require_falsifiable=False).ok
 
 
-def test_the_gate_scores_the_held_out_directives():
-    """Written before the rule, and they killed the first version of it.
+def test_the_rule_still_sorts_the_development_set():
+    """A regression check. **Not a measurement, and it must not be quoted as one.**
 
-    The candidate lever recorded in CLAUDE.md — "does the directive name a
-    referent present in the staged fixture?" — scored 11/11 on the shipped suite
-    it was derived from and **12/20 here**. This test is what stops that from
-    happening silently again: tune the rule, re-run, see the number.
+    The score object says so itself — `is_evidence` is False for a development
+    set — so a caller cannot mistake this for the number that says the rule
+    works. That distinction used to live in a comment, which is exactly how it
+    got lost.
+
+    What it is good for: change the rule, re-run, see immediately whether you
+    broke a case you had already handled.
     """
-    cases = _directives(heldout=True)
-    assert len(cases) == 20, "the held-out set must not shrink"
-    wrong = []
-    for name, text, expect in cases:
-        got = "accept" if check_plan(text, _spec()).ok else "refuse"
-        if got != expect:
-            wrong.append(f"{name}: wanted {expect}, got {got}")
-    assert not wrong, "\n".join(wrong)
+    score = _development_set().score(_refuses)
+    assert not score.is_evidence
+    assert score.total == 39
+    assert not score.wrong, "\n".join(score.wrong)
 
 
-def test_an_evaluative_motivation_does_not_refuse_a_concrete_deliverable():
-    """Over-refusal is the worse failure, and this is where it nearly happened.
+def test_no_real_work_in_the_development_set_is_refused():
+    """Over-refusal, asserted on its own rather than folded into an accuracy
+    figure that treats both directions as equally bad.
 
-    "Delete the unused imports to clean up the module" is entirely checkable.
-    The first working version of this gate refused six of these eight. Not
-    held-out data — these drove the fix, so they prove only that it stayed
-    fixed.
+    This is the direction that gets the tool uninstalled. A gate that accepts a
+    vague directive produces something to argue with; one that rejects real work
+    fails silently.
+
+    Among these 39 are the nine real tasks of the shipped suite, and the eight
+    cases that drove the fix after the first working gate refused six of them —
+    "delete the unused imports to clean up the module" being the one that made
+    the point.
     """
-    wrong = []
-    for name, text, expect in _directives(heldout=False):
-        got = "accept" if check_plan(text, _spec()).ok else "refuse"
-        if got != expect:
-            wrong.append(f"{name}: wanted {expect}, got {got}")
-    assert not wrong, "\n".join(wrong)
-
-
-def test_the_regression_cases_still_sort_correctly():
-    """The nine real tasks here MUST still be accepted.
-
-    A gate that refuses real work is worse than one that accepts vague work,
-    because it fails silently and the user simply stops trusting it.
-
-    These are regression cases, not evidence: the first version of the rule was
-    derived from them, so their score says nothing about how the rule
-    generalises. That is what the held-out twenty are for.
-    """
-    wrong = []
-    for name, text, expect in _directives(heldout=False):
-        got = "accept" if check_plan(text, _spec()).ok else "refuse"
-        if got != expect:
-            wrong.append(f"{name}: wanted {expect}, got {got}")
-    assert not wrong, "\n".join(wrong)
+    score = _development_set().score(_refuses)
+    assert score.false_refusals == 0, "\n".join(score.wrong)
 
 
 def test_the_refusal_says_what_would_fix_it():

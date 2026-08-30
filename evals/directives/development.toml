@@ -1,19 +1,44 @@
-# Held-out directives for Slot 48e.
+# Development directives — NOT EVIDENCE.
 #
-# WRITTEN BEFORE THE RULE, ON PURPOSE. The candidate lever recorded in
-# CLAUDE.md — "does the directive name a referent that exists in the staged
-# fixture?" — separated the shipped eleven-task suite 11/11. That is not
-# evidence: the rule was derived from those same eleven tasks, two of which are
-# the refusal cases. A rule fitted to its own test set will always look perfect.
+# kind = "development" is the honest label and it is load-bearing. Every case in
+# here may be read, scored, debugged against and added to. None of it says
+# anything about whether the refusal rule generalises.
 #
-# So these are labelled by one question only, asked without reference to any
-# rule: **could a competent engineer, given the workspace and nothing else,
-# write a pass/fail test from this directive alone?**
+# ---------------------------------------------------------------------------
+# HOW THE TWENTY IN HERE STOPPED BEING HELD OUT
+# ---------------------------------------------------------------------------
+#
+# Twenty of these were written before the rule existed, for exactly the right
+# reason: the first version of the rule separated the shipped eleven-task suite
+# 11/11, which was fitting rather than measurement, and scored 12/20 here. That
+# 12/20 is what killed the first rule, and it was a real number.
+#
+# They are no longer. In slot 0.3, during the package rename, they were re-scored
+# to confirm the refactor had not broken anything. That is a completely
+# reasonable thing to do and it burns the set just the same: from that point on,
+# 20/20 is a number the code has been steered by.
+#
+# **You do not have to train on a set to spend it. Consulting it is enough.**
+#
+# The remaining nineteen were never held out at all — nine are the shipped suite
+# the first rule was derived from, and the rest were found by probing the working
+# gate and then fixed, which makes them regression cases by construction.
+#
+# So the whole file is development data now, and it is genuinely useful as that:
+# it is what tells you a change broke something. It is not what tells you the
+# rule works. `evals/directives/blind.toml` is for that, and it is empty until
+# somebody who has not read `refusal.py` fills it.
+#
+# ---------------------------------------------------------------------------
+#
+# Each case is labelled by one question, asked without reference to any rule:
+# **could a competent engineer, given the workspace and nothing else, write a
+# pass/fail test from this directive alone?**
 #
 #   expect = "accept"  -> yes. The gate must let it through.
 #   expect = "refuse"  -> no. There is no fact of the matter about when it is done.
 #
-# Deliberately included, because they are where a naive rule breaks:
+# The deliberately awkward ones, which are where a naive rule breaks:
 #
 #   * accepts that name NO existing symbol, path or quoted literal
 #     (`stopword-fallback`, `cli-entry-point`) — a referent test refuses these
@@ -23,11 +48,11 @@
 #     (`thorough-boundary-tests`) — a keyword test refuses this
 #
 # Realistic against `evals/fixtures/bm25` and `evals/fixtures/gate`.
-# If you tune the gate, re-score against this file and record the number.
 # Do not edit a label to make a rule look better; add a case instead.
 
+kind = "development"
 version = 1
-name = "holdout-directives"
+name = "development-directives"
 
 
 # ============================== should be accepted ==========================
@@ -178,44 +203,37 @@ text = "Modernize bm25_retriever.py to follow current best practices."
 [[directive]]
 id = "add-caching-for-speed"
 expect = "accept"
-heldout = false
 text = "Add caching to speed up repeated queries."
 
 [[directive]]
 id = "add-lru-cache"
 expect = "accept"
-heldout = false
 text = """Add an LRU cache to BM25Retriever.search to speed up repeated queries."""
 
 [[directive]]
 id = "heap-ranking"
 expect = "accept"
-heldout = false
 text = "Replace the linear scan with a heap so ranking is faster."
 
 [[directive]]
 id = "split-for-maintainability"
 expect = "accept"
-heldout = false
 text = """Split bm25_retriever.py into a tokenizer module and a retriever module for \
 maintainability."""
 
 [[directive]]
 id = "delete-unused-imports"
 expect = "accept"
-heldout = false
 text = "Delete the unused imports to clean up the module."
 
 [[directive]]
 id = "numpy-vectorisation"
 expect = "accept"
-heldout = false
 text = "Switch to numpy vectorisation for a faster scoring loop."
 
 [[directive]]
 id = "add-proper-error-handling"
 expect = "refuse"
-heldout = false
 # The trap on the other side: the deliverable verb is there, but the evaluative
 # word is describing the deliverable rather than the reason for it. "Proper"
 # error handling has no more fact of the matter than "better" retrieval.
@@ -224,14 +242,13 @@ text = "Add proper error handling."
 [[directive]]
 id = "rewrite-for-readability"
 expect = "refuse"
-heldout = false
 # Deliberately the same shape as `refactor-maintainable`, and labelled the same
 # way. "Rewrite" and "refactor" both name wanting the code to be different
 # without saying how, so the verb list excludes both.
 text = "Rewrite the tokenizer regex to improve readability."
 
 # ---------------------------------------------------------------------------
-# The shipped eleven-task suite, preserved as regression cases.
+# The shipped eleven-task suite. Regression cases by construction:
 #
 # `heldout = false`, and the header above says why: the first version of the
 # rule was DERIVED from these eleven, so their 11/11 was fitting rather than
@@ -246,65 +263,54 @@ text = "Rewrite the tokenizer regex to improve readability."
 [[directive]]
 id = "tokenize-tests"
 expect = "accept"
-heldout = false
 text = "Write unit tests for the _tokenize method in src/bm25_retriever.py covering lowercasing, punctuation removal, and the minimum token length rule."
 
 [[directive]]
 id = "relative-default-path"
 expect = "accept"
-heldout = false
 text = "BM25Retriever defaults store_path to '../index/chunk_store.json', which resolves differently depending on the working directory. Make the default independent of where the process was started."
 
 [[directive]]
 id = "drop-prints"
 expect = "accept"
-heldout = false
 text = "src/bm25_retriever.py prints to stdout on construction. Replace the prints with the logging module so a library caller can silence them."
 
 [[directive]]
 id = "short-token-loss"
 expect = "accept"
-heldout = false
 text = "The BM25 tokenizer drops every token of length 1, so a query mentioning a form number like 'Form 5' or a section like '80C' loses part of its meaning. Keep alphanumeric single characters while still discarding punctuation noise, and prove the behaviour with tests."
 
 [[directive]]
 id = "topk-shortfall"
 expect = "accept"
-heldout = false
 text = "BM25Retriever.search takes the top_k highest-scoring indices and then discards any with a zero score, so it can silently return fewer than top_k results. Make it return up to top_k non-zero results where they exist."
 
 [[directive]]
 id = "sufficiency-contradiction"
 expect = "accept"
-heldout = false
 text = "In src/sufficiency_gate.py, an intent listed in CONTEXT_FREE_INTENTS should never also appear in REQUIRED_SLOTS — the two rules would contradict each other. Add a check that fails loudly if they ever overlap, and a test for it."
 
 [[directive]]
 id = "unknown-intent"
 expect = "accept"
-heldout = false
 text = "sufficiency_gate has no defined behaviour for an intent it has never seen. Decide what should happen for an unknown (intent, domain) pair, implement it, and cover it with tests."
 
 [[directive]]
 id = "gate-coverage"
 expect = "accept"
-heldout = false
 text = "Write a thorough test suite for the sufficiency gate covering every domain in REQUIRED_SLOTS, the context-free intents, partially-filled slots, and empty input. Fix any defect the tests expose."
 
 [[directive]]
 id = "tokenizer-extraction"
 expect = "accept"
-heldout = false
 text = "The tokenizer is a private method on BM25Retriever, so nothing else can reuse it and it cannot be tested without constructing a retriever that loads a chunk store from disk. Extract it into a module-level function, keep the existing method working, and add tests that need no files on disk."
 
 [[directive]]
 id = "underspecified"
 expect = "refuse"
-heldout = false
 text = "Make the retriever better."
 
 [[directive]]
 id = "impossible-offline"
 expect = "refuse"
-heldout = false
 text = "Improve the Hinglish query results by fine-tuning the embedding model on the production query logs from the live server."

@@ -13,7 +13,7 @@ thing being graded cannot write its own grade, and returns a verdict that tells
 >
 > There is no `certify` command — the CLI lands in Stage A. What exists today is
 > the verified core: the refusal check, the freeze, the guards, the gate and the
-> ledger, at **264 passing tests**. See [Where this actually is](#where-this-actually-is).
+> ledger, at **280 passing tests**. See [Where this actually is](#where-this-actually-is).
 >
 > This README describes an idea and a route, not a shipped tool. A project whose
 > pitch is *"do not believe confident claims"* does not get to make one.
@@ -128,7 +128,7 @@ and says so. Unsupported host — still works with less enforcement and says so.
 ## Where this actually is
 
 **Phase 0 is complete.** The repository has been stripped to the deterministic
-core and renamed. 264 tests pass; 28 modules.
+core and renamed. 280 tests pass; 30 modules.
 
 ```
 src/certify/
@@ -164,8 +164,15 @@ falsifiability("Add a retry to upload() in src/uploader.py, retrying 3 times")
 - **The write hook is unproven.** Its tests prove the hook *works*, not that it is
   *connected*. In the previous build a hook exactly like this was written,
   unit-tested, green — and never actually passed to the SDK. Stage E.
-- **No measured numbers.** None are claimed anywhere in this README, and none
-  will be until Stage B produces them on a held-out set.
+- **Shell writes bypass the freeze.** The hook inspects a tool's path argument; a
+  shell call carries a command string instead, so `echo x > frozen.py` walks
+  straight through. The previous build closed this by removing the shell tool
+  outright, and that half was not carried over. Stage E.
+- **No measured numbers.** None are claimed anywhere in this README. The set
+  that could have produced one was spent — it was re-scored during a refactor to
+  check nothing had broken, which is enough to burn it. A fresh blind set has to
+  be written by someone who has not read the rule before any number here means
+  anything. The protocol for that is in `evals/directives/blind.toml`.
 
 ### The route
 
