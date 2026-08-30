@@ -240,11 +240,26 @@ Stages C and E are ordered before F.
 
 ---
 
-## Phase 0 — The strip
+## Phase 0 — The strip ✅ complete
 
 Goal: a green suite over a tree that contains only what OPERATOR-v2 needs.
 
-### Slot 0.1 — Tag, then delete
+**Done.** 786 tests before, 264 after; 28 modules, all importing as `certify`.
+The 522 tests that went were tests of deleted code. Two things came out better
+than forecast and one worse:
+
+* `backends/` did not need cutting — it imports nothing but `core.schemas` and
+  `guards`, so `verify/` had no coupling to break. Kept, and A.2 makes it
+  portable rather than replacing it.
+* Config surgery went further than planned. `config.py` fell 564 → 240 lines
+  once every section describing deleted machinery came out, and `load_settings`
+  no longer needs a model configured before anything will load.
+* **0.1 deleted the tests for code 0.3 then rehomed.** `test_conductor.py`
+  covered `rationale`, `directive` and `authorship`; deleting it left the
+  falsifiability check with no tests at all for two slots. Recovered from the
+  tag in 0.3. Sequence the test move with the code move next time.
+
+### Slot 0.1 — Tag, then delete ✅
 
 `git tag v1-orchestrator HEAD` first (free, local, recoverable), then delete in
 one commit.
@@ -286,7 +301,7 @@ and rewrite `test_verify.py` in 0.2.
 Expected after this slot: ~196 of 717 tests still importable, suite red at three
 known points, fixed in 0.2.
 
-### Slot 0.2 — Cut the three coupling lines
+### Slot 0.2 — Cut the three coupling lines ✅
 
 The exploration found exactly three places where a survivor reaches into a
 deleted package. Nothing else in `core/`, `guards/` or `verify/` names one.
@@ -307,7 +322,7 @@ deleted package. Nothing else in `core/`, `guards/` or `verify/` names one.
 
 Suite green at the end of this slot.
 
-### Slot 0.3 — Rehome the survivors and rename
+### Slot 0.3 — Rehome the survivors and rename ✅
 
 Move, do not rewrite. Each of these was confirmed **reusable as-is**:
 
@@ -341,7 +356,7 @@ src/certify/
   quality/      Stage G     hosts/     Stage H     jarvis/ Stage I
 ```
 
-### Slot 0.4 — Rewrite `CLAUDE.md`
+### Slot 0.4 — Rewrite `CLAUDE.md` ✅
 
 Replace it with the v2 memory: the lesson tables above, the merged "Rules that
 must not be broken" from both documents, and the new layout. Three documents from
