@@ -57,6 +57,7 @@ EXEMPT: dict[str, str] = {
 PENDING: dict[str, str] = {
     # The product's own surface. Nothing calls these because there is no CLI —
     # which is the single most honest summary of where this repository is.
+    "certify.gate": "A.1 — `certify verify` is the only caller it needs",
     "certify.refusal": "A.1 — `certify check` is the first caller",
     "certify.session": "E.1 — the session record",
     "certify.criteria": "E.2 — `certify begin` freezes through it",

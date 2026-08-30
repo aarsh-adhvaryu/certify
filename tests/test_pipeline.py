@@ -36,11 +36,12 @@ from certify.core.config import PolicyConfig
 from certify.core.ids import FrozenClock, SequentialIds
 from certify.core.journal import Journal
 from certify.core.lifecycle import TaskLifecycle
-from certify.core.schemas import TaskSpec, TaskStatus, VerdictStatus
+from certify.core.schemas import TaskSpec, TaskStatus, Verdict, VerdictStatus
 from certify.core.state import StateStore
 from certify.criteria import freeze_existing
 from certify.guards import GuardDenied, PathJail
 from certify.hosts.claude_code import build_jail_hook
+from certify.manifest import Manifest
 from certify.refusal import check_plan, falsifiability
 from certify.session import DirectiveGuard
 from certify.verify import PytestGate, VerifyContext
@@ -329,3 +330,79 @@ async def test_the_journal_the_agent_can_read_is_the_one_it_cannot_rewrite(repo,
     assert jail.resolve("OPERATOR.md").read_text(encoding="utf-8")
     with pytest.raises(GuardDenied):
         jail.resolve_for_write("OPERATOR.md")
+
+
+# ============================================ what the manifest catches
+
+
+async def test_the_manifest_catches_the_write_the_hook_cannot_see(repo, jail, gate, tmp_path):
+    """**The point of hashing content instead of watching writes.**
+
+    The shell bypass above is a real hole and stays open until E.3. But an agent
+    that walks through it still cannot get a PASS it did not earn, because the
+    manifest does not care *how* the bytes changed.
+
+    Two independent mechanisms, failing in different directions: the hook stops
+    the write it can see, the manifest notices every write it cannot. Neither is
+    sufficient. Together they mean the hole costs detection latency rather than
+    the guarantee.
+    """
+    criteria = repo / "tests" / "test_acceptance.py"
+    _write(criteria, CRITERIA)
+    freeze_existing(jail, "tests/test_acceptance.py")
+
+    manifest = Manifest.freeze(
+        repo, DIRECTIVE, ["tests/test_acceptance.py"], scope=["src/"],
+        clock=FrozenClock(T0, step=timedelta(seconds=1)),
+    )
+    manifest_path = manifest.save(tmp_path / "outside-the-worktree" / "m.json")
+
+    # The agent cannot pass, so it rewrites the grade — through a path the hook
+    # does not inspect. Simulated by writing directly, exactly as `echo >` would.
+    _write(repo / "src" / "uploader.py", BROKEN)
+    criteria.write_text("def test_it_retries_exactly_three_times():\n    pass\n", encoding="utf-8")
+
+    # The suite now passes. It means nothing.
+    verdict = await gate.verify(_ctx(repo))
+    assert verdict.status is VerdictStatus.PASS, "the weakened suite should pass"
+
+    # And the manifest says why that pass is worthless.
+    report = Manifest.load(manifest_path).check(repo)
+    assert not report.ok
+    assert report.modified == ["tests/test_acceptance.py"]
+
+    final = Verdict.tampered("manifest", report.summary)
+    assert final.status is VerdictStatus.TAMPERED
+    assert not final.ok, "a pass on criteria that moved is never a pass"
+    assert final.failure_class.halts
+    assert not final.failure_class.escalates
+
+
+async def test_an_honest_run_is_not_accused_of_tampering(repo, jail, gate, tmp_path):
+    """Over-refusal, in the place it would be most damaging. A tamper check that
+    fires on ordinary work makes every green run suspect and gets switched off."""
+    _write(repo / "tests" / "test_acceptance.py", CRITERIA)
+    freeze_existing(jail, "tests/test_acceptance.py")
+    manifest = Manifest.freeze(
+        repo, DIRECTIVE, ["tests/test_acceptance.py"],
+        clock=FrozenClock(T0, step=timedelta(seconds=1)),
+    )
+    path = manifest.save(tmp_path / "m.json")
+
+    _write(repo / "src" / "uploader.py", HONEST)
+
+    assert (await gate.verify(_ctx(repo))).status is VerdictStatus.PASS
+    assert Manifest.load(path).check(repo).ok
+
+
+async def test_a_run_with_no_criteria_is_unverifiable_not_failed(repo, gate):
+    """Reporting "your work is wrong" when the truth is "I never had a way to
+    tell" is the specific dishonesty this project exists to remove."""
+    spec = TaskSpec(spec_id="s", task_id="t", goal="do the thing", acceptance=[])
+    check = check_plan(DIRECTIVE, spec)
+    assert not check.ok
+
+    verdict = Verdict.unverifiable("refusal", check.problems[0])
+    assert verdict.status is VerdictStatus.UNVERIFIABLE
+    assert verdict.status is not VerdictStatus.FAIL
+    assert verdict.failure_class.halts

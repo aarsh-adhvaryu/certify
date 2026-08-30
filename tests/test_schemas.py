@@ -109,7 +109,7 @@ def test_verdict_constructors_pair_status_with_failure_class():
     assert bad.reason == "2 failed"
 
     broken = Verdict.errored("pytest", reason="pytest not found")
-    assert broken.status is VerdictStatus.ERROR
+    assert broken.status is VerdictStatus.TOOL_ERROR
     assert broken.failure_class is FailureClass.TRANSPORT
 
 

@@ -13,7 +13,7 @@ thing being graded cannot write its own grade, and returns a verdict that tells
 >
 > There is no `certify` command — the CLI lands in Stage A. What exists today is
 > the verified core: the refusal check, the freeze, the guards, the gate and the
-> ledger, at **289 passing tests**. See [Where this actually is](#where-this-actually-is).
+> ledger, at **329 passing tests**. See [Where this actually is](#where-this-actually-is).
 >
 > This README describes an idea and a route, not a shipped tool. A project whose
 > pitch is *"do not believe confident claims"* does not get to make one.
@@ -128,7 +128,7 @@ and says so. Unsupported host — still works with less enforcement and says so.
 ## Where this actually is
 
 **Phase 0 is complete.** The repository has been stripped to the deterministic
-core and renamed. 289 tests pass; 30 modules.
+core and renamed. 329 tests pass; 32 modules.
 
 ```
 src/certify/

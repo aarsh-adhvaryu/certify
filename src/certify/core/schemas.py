@@ -86,6 +86,25 @@ class FailureClass(str, Enum):
     BUDGET = "budget"
     """A cost ceiling was hit. Halts the task rather than retrying it."""
 
+    TAMPERED = "tampered"
+    """The evidence changed under us.
+
+    Deliberately not GUARD: a guard trip means a guard *fired*. This means one
+    did not — the criteria were reached by a path nothing was watching, and the
+    only reason we know is that the hashes moved. Deliberately not VERIFIER
+    either: nothing here says the work was wrong, only that we can no longer
+    tell. Retrying is pointless and escalating is meaningless, so it halts.
+    """
+
+    UNVERIFIABLE = "unverifiable"
+    """There was nothing to check against.
+
+    No criteria, an unfalsifiable directive, or a manifest that could not be
+    read. Distinct from FAIL because reporting "your work is wrong" when the
+    truth is "I never had a way to tell" is the specific dishonesty this whole
+    project exists to remove.
+    """
+
     @property
     def escalates(self) -> bool:
         """Whether this failure may advance the execution ladder."""
@@ -103,16 +122,50 @@ class FailureClass(str, Enum):
 
     @property
     def halts(self) -> bool:
-        """Whether this failure stops the task outright."""
-        return self is FailureClass.BUDGET
+        """Whether this failure stops the task outright.
+
+        Retrying a tampered or unverifiable run does not make it verifiable; it
+        just spends the allowance again to reach the same non-answer.
+        """
+        return self in (
+            FailureClass.BUDGET,
+            FailureClass.TAMPERED,
+            FailureClass.UNVERIFIABLE,
+        )
 
 
 class VerdictStatus(str, Enum):
+    """Five outcomes, because four of them need different responses.
+
+    Collapsing any pair of these is how a tool starts lying: "it failed" when the
+    suite never ran, or "it passed" when the thing grading it had been edited.
+    """
+
     PASS = "pass"
+    """The work met criteria that were frozen before it began."""
+
     FAIL = "fail"
-    ERROR = "error"
-    """The verifier itself blew up. Distinct from FAIL so a broken verifier
-    cannot be mistaken for a weak model."""
+    """The gate ran, and the work did not meet the criteria. **Fix the work.**"""
+
+    TOOL_ERROR = "tool_error"
+    """The check could not run — pytest missing, a timeout, a crash.
+
+    `pytest` exits 1 both when tests fail and when pytest is not installed, so
+    this is confirmed by looking at the output, never inferred from the code.
+    Distinct from FAIL because a broken environment must never read as a weak
+    model. **Fix the tooling.**
+    """
+
+    TAMPERED = "tampered"
+    """The criteria changed after they were frozen. **Do not trust the result.**
+
+    Whatever the suite reported is now uninterpretable, including a pass —
+    especially a pass.
+    """
+
+    UNVERIFIABLE = "unverifiable"
+    """Nothing to check against: no criteria, or a directive with no success
+    condition. **Not a failure. Say what is missing and hand it back.**"""
 
 
 # --------------------------------------------------------------------------
@@ -166,8 +219,45 @@ class Verdict(Strict):
         """The verifier could not run. Classed as TRANSPORT so it retries at the
         same tier and never becomes a training label."""
         return cls(
-            status=VerdictStatus.ERROR,
+            status=VerdictStatus.TOOL_ERROR,
             failure_class=FailureClass.TRANSPORT,
+            verifier=verifier,
+            reason=reason,
+            duration_ms=duration_ms,
+            detail=detail,
+        )
+
+    @classmethod
+    def tampered(
+        cls, verifier: str, reason: str, duration_ms: int = 0, **detail: str
+    ) -> Verdict:
+        """The criteria moved after the freeze, so nothing here is interpretable.
+
+        Never PASS, whatever the suite said. A pass on criteria that changed
+        under us is the exact outcome this project exists to refuse, and the
+        loudest one to get wrong.
+        """
+        return cls(
+            status=VerdictStatus.TAMPERED,
+            failure_class=FailureClass.TAMPERED,
+            verifier=verifier,
+            reason=reason,
+            duration_ms=duration_ms,
+            detail=detail,
+        )
+
+    @classmethod
+    def unverifiable(
+        cls, verifier: str, reason: str, duration_ms: int = 0, **detail: str
+    ) -> Verdict:
+        """There was nothing to check against.
+
+        Not a failure. The work may be perfect; we have no way to say. Report
+        what is missing and hand it back — never dress this up as a FAIL.
+        """
+        return cls(
+            status=VerdictStatus.UNVERIFIABLE,
+            failure_class=FailureClass.UNVERIFIABLE,
             verifier=verifier,
             reason=reason,
             duration_ms=duration_ms,
@@ -176,6 +266,11 @@ class Verdict(Strict):
 
     @property
     def ok(self) -> bool:
+        """PASS and nothing else.
+
+        Written as an identity check rather than `!= FAIL`, so a status added
+        later is not silently ok by default.
+        """
         return self.status is VerdictStatus.PASS
 
 

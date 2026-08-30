@@ -22,7 +22,7 @@ context every session; it earns that by being current, not by being complete.
 
 ## Status
 
-**Phase 0 complete.** 289 tests green, 30 modules. Python 3.13 in `.venv`.
+**Phase 0 complete.** 329 tests green, 32 modules. Python 3.13 in `.venv`.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/ -q
@@ -80,14 +80,18 @@ SQLite's job.
 
 ### Known gaps, each with a test that says so
 
-- **The freeze does not survive the process.** `PathJail` holds its frozen set in
-  memory, on the instance. `begin` and `verify` are separate processes, so
-  containment is real within one run and absent across two. Closed by **E.1**.
+- **The freeze does not survive the process** — `PathJail` holds its frozen set in
+  memory. ✅ **Half closed:** `certify.manifest` is the durable record, pinning
+  criteria by content hash, and `certify.gate` turns it into a verdict. What is
+  still missing is `begin` writing one and `verify` reading it, which is the CLI.
   See `test_criteria.py::test_the_freeze_does_not_survive_the_process`.
 - **The write hook is unproven** — `test_hosts.py` proves it *works*, not that it
   is *connected*. The previous build's hook was written, unit-tested, green, and
   never passed to the SDK. Closed by **E.3**.
-- **⚠️ Shell writes bypass the freeze entirely.** The hook reads `file_path` /
+- **⚠️ Shell writes bypass the freeze entirely** — but no longer buy a false pass.
+  The manifest hashes content, so it notices a change however it arrived; the
+  hole now costs detection latency rather than the guarantee. Two mechanisms
+  failing in different directions, and neither is sufficient alone. The hook reads `file_path` /
   `notebook_path` / `path`; a Bash call carries a `command` string, so the hook
   finds no path and allows it. `echo x > frozen.py` defeats the guard that exists
   to stop exactly that. v1 closed this by removing the Bash tool outright —

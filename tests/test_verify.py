@@ -184,7 +184,7 @@ async def test_an_unreadable_file_is_our_fault_not_the_models(workspace):
     verdict = await PythonSyntaxVerifier().verify(
         _ctx(workspace, changed_paths=["missing.py"])
     )
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert verdict.failure_class is FailureClass.TRANSPORT
     assert not verdict.failure_class.trains_router
 
@@ -295,7 +295,7 @@ async def test_a_collection_error_is_not_a_model_failure(workspace, backend):
     _suite(workspace, "import a_module_that_does_not_exist\n\ndef test_x():\n    pass\n")
     verdict = await PytestGate(backend).verify(_ctx(workspace))
 
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert verdict.failure_class is FailureClass.TRANSPORT
     assert not verdict.failure_class.escalates
     assert not verdict.failure_class.trains_router
@@ -329,7 +329,7 @@ async def test_a_missing_pytest_is_not_a_test_failure(workspace, jail):
     _suite(workspace, "def test_ok():\n    assert True\n")
     verdict = await PytestGate(plain).verify(_ctx(workspace))
 
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert verdict.failure_class is FailureClass.TRANSPORT
     assert not verdict.failure_class.escalates
     assert not verdict.failure_class.trains_router
@@ -349,7 +349,7 @@ async def test_no_tests_collected_is_an_error_not_a_pass(workspace, backend):
     (workspace / "tests").mkdir()
     verdict = await PytestGate(backend).verify(_ctx(workspace))
 
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert "no tests were collected" in verdict.reason
 
 
@@ -357,7 +357,7 @@ async def test_a_hanging_suite_is_an_error_not_a_failure(workspace, backend):
     _suite(workspace, "import time\n\ndef test_slow():\n    time.sleep(30)\n")
     verdict = await PytestGate(backend, timeout=2.0).verify(_ctx(workspace))
 
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert "did not finish" in verdict.reason
 
 
@@ -366,7 +366,7 @@ async def test_the_gate_runs_under_the_jail(workspace, jail):
     backend = WindowsBackend(jail, CommandGuard([]))  # nothing allowed
     verdict = await PytestGate(backend).verify(_ctx(workspace))
 
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert "could not run" in verdict.reason
 
 
@@ -468,7 +468,7 @@ async def test_command_verifier_timeout_is_an_error(workspace, backend):
         backend, ["python", "-c", "import time; time.sleep(10)"], timeout=0.5
     )
     verdict = await verifier.verify(_ctx(workspace))
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
 
 
 async def test_a_guard_denial_inside_a_verifier_is_not_a_model_failure(workspace, jail):
@@ -476,7 +476,7 @@ async def test_a_guard_denial_inside_a_verifier_is_not_a_model_failure(workspace
     verifier = CommandVerifier(backend, ["curl", "http://evil"])
     verdict = await verifier.verify(_ctx(workspace))
 
-    assert verdict.status is VerdictStatus.ERROR
+    assert verdict.status is VerdictStatus.TOOL_ERROR
     assert not verdict.failure_class.trains_router
 
 
