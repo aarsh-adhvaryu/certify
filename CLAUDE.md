@@ -22,7 +22,7 @@ context every session; it earns that by being current, not by being complete.
 
 ## Status
 
-**Phase 0 complete.** 264 tests green, 28 modules. Python 3.13 in `.venv`.
+**Phase 0 complete.** 289 tests green, 30 modules. Python 3.13 in `.venv`.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/ -q
@@ -301,7 +301,38 @@ hygiene, a learned router, the conductor, the tier ladder, the model registry.
 ## Working rhythm
 
 One slot per session: one component plus its tests, sized to finish on green.
-`pytest` passes before the session ends, and the pipeline gets run by hand.
+
+**A slot is done when `scripts/slot_check.py` exits 0. Not when pytest is green.**
+
+```powershell
+.\.venv\Scripts\python.exe scripts\slot_check.py
+```
+
+Pytest was the gate before, and pytest is precisely the instrument that missed
+all three of the failures below. The script checks what a unit suite structurally
+cannot:
+
+| check | what it catches |
+|---|---|
+| suite | ordinary regressions |
+| pipeline | `tests/test_pipeline.py` still exists, still has real tests, and still passes on a real repository. Deleting the slow test is the cheapest way to make this discipline evaporate |
+| imports | a module that no longer loads |
+| **orphans** | **a module imported by nothing in `src/` — green in isolation, wired to nothing.** Test imports deliberately do not count: being tested is exactly what made the dead code look alive |
+| holes | every `xfail(strict=True)` is still marked and still failing |
+
+`PENDING` in that script lists what is legitimately orphaned today, each with the
+slot that ends it. It is a countdown, not an exemption list — a module that stops
+being orphaned *also* fails the check, so the list has to be pruned deliberately.
+
+### The failure this exists to stop
+
+Three times, a component was green in isolation and wired to nothing:
+
+1. the suspend/resume mechanism, consumed by nothing at all;
+2. the write hook, built, unit-tested, and never passed to the SDK;
+3. the shell bypass, defeating sixteen green containment tests with `echo >`.
+
+All three had unit tests. That is the point — more of them would not have helped.
 
 Update this file when something here stops being true. Deviating from `PLAN.md`
 is fine and sometimes correct — write down what changed and why.
