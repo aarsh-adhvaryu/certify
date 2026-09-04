@@ -20,7 +20,16 @@ context every session; it earns that by being current, not by being complete.
 
 ---
 
-## Status
+## Status — not continued, stopped September 2026
+
+**Development stopped.** Phase 0 is complete and Stages A–I were not built. The
+honest cause: a CLI was always the next slot and never the current one, so none of
+this was ever reachable by a user and the premise was never tested against real
+use. `README.md` carries the one real finding, in both directions.
+
+Nothing below has been softened or tidied. The known gaps are stated as they were,
+the rules stand, and the two lesson tables at the bottom are the part worth
+keeping — each line of them cost a real bug.
 
 **Phase 0 complete.** 329 tests green, 32 modules. Python 3.13 in `.venv`.
 

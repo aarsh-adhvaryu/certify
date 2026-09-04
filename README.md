@@ -9,16 +9,103 @@ thing being graded cannot write its own grade, and returns a verdict that tells
 
 **It calls no model to do any of this.** No API key, no tokens, nothing to bill.
 
-> ### ⚠️ Status: early. Nothing is runnable yet.
+> ### 🪦 Not continued. Stopped September 2026.
 >
-> There is no `certify` command — the CLI lands in Stage A. What exists today is
-> the verified core: the refusal check, the freeze, the guards, the gate and the
-> ledger, at **329 passing tests**. See [Where this actually is](#where-this-actually-is).
+> **There is no `certify` command, and there never was.** A CLI was always the
+> next slot and never the current one, so none of this was ever reachable by a
+> user. That is the honest reason development stopped — not that the idea was
+> disproved, but that it was never taken far enough to be tested against real use.
 >
-> This README describes an idea and a route, not a shipped tool. A project whose
-> pitch is *"do not believe confident claims"* does not get to make one.
+> What exists is a verified core at **329 passing tests**: the refusal check, the
+> freeze, a content-hash manifest, the guards, the gate. It is a library nothing
+> calls. See [What the data showed](#what-the-data-showed) for the one real
+> finding, in both directions, and [What is reusable](#what-is-reusable) for the
+> parts that stand on their own.
 
 ---
+
+## What the data showed
+
+One real finding, and it cuts both ways. It is recorded here in full because a
+project built on *"do not believe confident claims"* does not get to exit with a
+flattering summary of itself.
+
+### For the idea
+
+The previous incarnation of this repository was an LLM orchestrator, and it left
+two graded runs of an eleven-task suite behind. In both of them, on both models,
+the gate **certified this directive as done**:
+
+```
+"Make the retriever better."
+
+  claude_code   1 attempt,  1423s (24 min)   →  reported: PASSED ✓
+  deepseek      2 attempts,  927s (15 min)   →  reported: PASSED ✓
+```
+
+There is no state of the world that counts as having arrived at "better". Forty
+minutes of real compute produced a confident success report on a task that could
+not be completed, twice, and nothing objected.
+
+That is exactly the failure this project was built to prevent, observed on real
+work rather than imagined. `falsifiability()` refuses that directive today at
+zero attempts and zero tokens, naming what is missing and what would fix it.
+
+### Against it
+
+**The base rate is designed, not natural.** Those doomed tasks were *deliberately
+planted* in the suite as refusal cases. Two-in-eleven is a property of how the
+suite was written, not a measurement of how often a real directive is
+unfalsifiable. That number was never measured.
+
+**The refusal rule has no honest accuracy figure.** None. A twenty-directive set
+written before the rule existed once produced a real one — it scored the first
+version 12/20 and killed it. That set was then re-scored during a refactor to
+check nothing had broken, which is a completely reasonable thing to do and burns
+it just the same. You do not have to train on a set to spend it. Consulting it is
+enough. `evals/directives/blind.toml` is the replacement and it is **empty**.
+
+**And a proposed mechanism died on this same data.** A loop breaker — halt the
+agent when it repeats a failed approach — looked obviously worth building until
+the runs were actually checked: retry was *productive* nine times out of eleven,
+and the single most expensive failure was already caught for free by the refusal
+check. It was never built. Killing it cost an afternoon instead of a month, which
+is the one part of the discipline here that unambiguously worked.
+
+### Known holes, left exactly as they were
+
+Not fixed on the way out. Patching them now would leave the repository claiming a
+soundness it was never taken far enough to have.
+
+- **Shell writes bypass the write hook.** It inspects a tool's path argument; a
+  shell call carries a command string, so `echo x > frozen.py` walks straight
+  through. The manifest still detects the change afterwards, so the hole costs
+  detection latency rather than the guarantee — but the guard does not hold.
+- **The hook is unproven.** Its tests show it *works*, not that it is
+  *connected*. In the previous build a hook exactly like it was written,
+  unit-tested, green, and never actually passed to the SDK.
+- **No measured cost saving.** None is claimed anywhere in this file.
+
+## What is reusable
+
+The parts that stand alone, for anything else:
+
+| | |
+|---|---|
+| `guards/pathjail.py` | Resolve-then-contain, with a real escape suite: traversal, junctions, UNC, reserved device names, drive-relative paths, alternate data streams. Carries the Windows lesson that a **junction** tests what a symlink cannot, because `symlink_to` needs a privilege and so `skipif(nt)` skips the escape that matters most on the platform it runs on |
+| `manifest.py` | Content-hash tamper evidence, with three trust levels — evident / resistant / trusted — stated rather than blurred, and a test asserting the *limit* of each |
+| `refusal.py` | `falsifiability()`. Pure regex, no dependencies beyond `re` |
+| `measure/directives.py` | A directive set that refuses to be scored before it is sealed, and marks itself burnt on first use — the discipline enforced in code rather than in a comment |
+| `scripts/slot_check.py` | The orphan check: a module imported by nothing in `src/`, where **test imports deliberately do not count**. It caught "green in isolation, wired to nothing" three times in a single session |
+
+`CLAUDE.md` holds the rules and the two lesson tables — what the orchestrator got
+right, and what it got wrong. That is the part with value beyond this repository,
+and each line of it cost a real bug.
+
+---
+
+*Everything below this line was written while the project was live, and is left
+as it was.*
 
 ## The problem
 

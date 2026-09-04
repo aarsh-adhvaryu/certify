@@ -1,5 +1,15 @@
 # Pivot: strip the orchestrator, build the verification layer
 
+> **🪦 DORMANT. This route was not completed.** Phase 0 shipped in full; Stages
+> A–I were not built. Slot A.1 — the `[project.scripts]` entry point that would
+> have made `certify` a real command — is where it stopped, which is also why it
+> stopped: nothing here was ever reachable by a user.
+>
+> Kept rather than deleted, and kept unedited. A plan that was deliberately
+> stopped at a known point is more useful than one that trails off, and the
+> reasoning in it is the part that outlives the code. See `README.md` for what
+> the data actually showed.
+
 ## Context
 
 `d:\orchestrator` currently holds a working LLM orchestrator — 786 tests, ~13,000
